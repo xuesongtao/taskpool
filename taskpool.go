@@ -227,8 +227,8 @@ func (t *TaskPool) freeWorkerQueueLPop() (w *worker) {
 		return nil
 	}
 	w = t.freeWorkerQueue[0]
-	t.freeWorkerQueue[0] = nil
-	t.freeWorkerQueue = t.freeWorkerQueue[1:]
+	// 复用
+	t.freeWorkerQueue = append(t.freeWorkerQueue[:0], t.freeWorkerQueue[1:]...)
 	return
 }
 
@@ -341,12 +341,11 @@ func (t *TaskPool) cleanUp() {
 		return
 	}
 
-	// 先置空, 避免内存泄露
-	t.freeWorkerQueue[expireAtIndex] = nil
+	// 通过清空在append达到复用
 	if expireAtIndex == 0 {
-		t.freeWorkerQueue = t.freeWorkerQueue[1:]
+		t.freeWorkerQueue = append(t.freeWorkerQueue[:0], t.freeWorkerQueue[1:]...)
 	} else if expireAtIndex == l-1 {
-		t.freeWorkerQueue = t.freeWorkerQueue[:l-1]
+		t.freeWorkerQueue = append(t.freeWorkerQueue[:0], t.freeWorkerQueue[:l-1]...)
 	} else {
 		t.freeWorkerQueue = append(t.freeWorkerQueue[:expireAtIndex], t.freeWorkerQueue[expireAtIndex+1:]...)
 	}
