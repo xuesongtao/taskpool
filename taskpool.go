@@ -300,7 +300,7 @@ func (t *TaskPool) awaken() {
 		t.cond.Signal()
 	}
 
-	// 剩余可运行的数量
+	// 上面根据队列空闲worker来释放有可能出现总队列数小于容量(过期的会被自动清理), 所有可以再更加剩余可运行的数量进行唤醒
 	remainCanRunning := t.capacity - int(running)
 	for j := 0; j < remainCanRunning; j++ {
 		t.cond.Signal()
@@ -323,7 +323,7 @@ func (t *TaskPool) cleanUp() {
 		return
 	}
 
-	// 每轮只清理一个就退出
+	// 每轮只清理一个就退出, 保证尽可能多的worker执行
 	expireAtIndex := -1
 	for index, w := range t.freeWorkerQueue {
 		if curTimestamp > w.startTime+t.workerMaxLifeCycle {
