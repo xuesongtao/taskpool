@@ -30,40 +30,42 @@ const (
 	levelError
 )
 
-// 设置日志 log
+// WithPoolLogger 设置日志 log
 func WithPoolLogger(logger cjLogger) TaskPoolOption {
 	return func(p *TaskPool) {
 		p.log = logger
 	}
 }
 
-// 设置 taskPool 中哨兵轮询地时间
+// WithPolTime 设置 taskPool 中哨兵轮询地时间
 func WithPolTime(t time.Duration) TaskPoolOption {
 	return func(p *TaskPool) {
 		p.polTime = t
 	}
 }
 
-// 设置 taskPool 中空闲的 worker 存活的时间
+// WithWorkerMaxLifeCycle 设置 taskPool 中空闲的 worker 存活的时间
 func WithWorkerMaxLifeCycle(timeForSec sec) TaskPoolOption {
 	return func(p *TaskPool) {
 		p.workerMaxLifeCycle = timeForSec
 	}
 }
 
-// 预分配协程
+// WithProGoWorker 预分配协程
 func WithProGoWorker() TaskPoolOption {
 	return func(p *TaskPool) {
 		p.isPre = true
 	}
 }
 
+// worker 工作者
 type worker struct {
 	ctx       context.Context // 用于传递关闭信号
 	startTime int64           // 记录开始的时间
 	taskCh    chan taskFunc
 }
 
+// newWorker
 func newWorker(ctx context.Context) *worker {
 	return &worker{
 		ctx:       ctx,
@@ -72,6 +74,7 @@ func newWorker(ctx context.Context) *worker {
 	}
 }
 
+// goWorker 起一个工作协程
 func (w *worker) goWorker(pool *TaskPool) {
 	go func() {
 		defer func() {
@@ -106,6 +109,7 @@ func (w *worker) goWorker(pool *TaskPool) {
 	}()
 }
 
+// TaskPool 任务池
 type TaskPool struct {
 	isPre              bool          // 是否预先分配协程
 	running            int32         // 正在运行的数量
@@ -124,7 +128,7 @@ type TaskPool struct {
 	cond               *sync.Cond
 }
 
-// 通过此方法内部创建 ctx, 只能通过 Close() 来关闭协程池
+// NewTaskPool 通过此方法内部创建 ctx, 只能通过 Close() 来关闭协程池
 func NewTaskPool(poolName string, capacity int, opts ...TaskPoolOption) *TaskPool {
 	ctx, cancel := context.WithCancel(context.Background())
 	if capacity <= 0 || capacity >= 9999 {
@@ -161,7 +165,7 @@ func NewTaskPool(poolName string, capacity int, opts ...TaskPoolOption) *TaskPoo
 	return t
 }
 
-// 预先分配
+// preGoWorker 预先分配
 func (t *TaskPool) preGoWorker() {
 	for i := 0; i < t.capacity; i++ {
 		w := t.workerCache.Get().(*worker)
@@ -171,7 +175,7 @@ func (t *TaskPool) preGoWorker() {
 	}
 }
 
-// 对外通过此方法向协程池添加任务
+// Submit 对外通过此方法向协程池添加任务
 // 使用:
 // 		1. 如果任务为 func() 的话可以直接传入,
 // 		2. 如果带参的 func 需要包裹下, 如: test(1, 2, 3) => func() {test(1, 2, 3)}
@@ -184,7 +188,7 @@ func (t *TaskPool) Submit(task taskFunc) {
 	w.taskCh <- task
 }
 
-// 生成 goroutine, 如果运行的数量大于等于最大数目的时候进行阻塞
+// getFreeWorker 生成 goroutine, 如果运行的数量大于等于最大数目的时候进行阻塞
 func (t *TaskPool) getFreeWorker() (w *worker) {
 	runFunc := func() {
 		w = t.workerCache.Get().(*worker)
@@ -216,7 +220,7 @@ rePop:
 	return
 }
 
-// 从 freeWorkerQueue 头取一个 worker
+// freeWorkerQueueLPop 从 freeWorkerQueue 头取一个 worker
 func (t *TaskPool) freeWorkerQueueLPop() (w *worker) {
 	l := len(t.freeWorkerQueue)
 	if l == 0 {
@@ -228,7 +232,7 @@ func (t *TaskPool) freeWorkerQueueLPop() (w *worker) {
 	return
 }
 
-// 归还 worker, 从 freeWorkerQueue 尾部追加
+// freeWorkerQueueAppend 归还 worker, 从 freeWorkerQueue 尾部追加
 func (t *TaskPool) freeWorkerQueueAppend(w *worker) (isGiveUp bool) {
 	t.rwMu.Lock()
 	defer t.rwMu.Unlock()
@@ -244,21 +248,22 @@ func (t *TaskPool) freeWorkerQueueAppend(w *worker) (isGiveUp bool) {
 	return false
 }
 
+// poolSentinel 哨兵
 // 1. 定时唤醒加入阻塞队列的 worker
 // 2. 空闲的时候清除 freeWorkerQueue 里的 worker
 func (t *TaskPool) poolSentinel(ctx context.Context) {
 	heartbeat := time.NewTicker(t.polTime)
 	defer func() {
-		heartbeat.Stop()
 		if err := recover(); err != nil {
 			t.printStackInfo("poolSentinel", err)
 		}
+		heartbeat.Stop()
 
-		// 释放
+		// 释放子协程
 		t.Close()
 	}()
 
-	// 这里根据轮询时间换算清理时间, 这里换算公式如: 1s 轮询一次, 1min 才清理一次
+	// 这里根据轮询时间换算清理时间(采用尽可能多的让子协程存活原则), 这里换算公式如: 1s 轮询一次, 1min 才清理一次
 	cleanUpTime := 60 * sec(t.polTime/time.Second)
 	for {
 		select {
@@ -276,7 +281,7 @@ func (t *TaskPool) poolSentinel(ctx context.Context) {
 	}
 }
 
-// 唤醒阻塞队列
+// awaken 唤醒阻塞队列
 func (t *TaskPool) awaken() {
 	// 判断 freeWorkerQueue 里是否有空闲的 worker,
 	// 1. 如果空闲的总数等于设置的容量就全部释放
@@ -307,7 +312,7 @@ func (t *TaskPool) awaken() {
 	}
 }
 
-// 清理生命周期到期的 worker
+// cleanUp 清理生命周期到期的 worker
 func (t *TaskPool) cleanUp() {
 	t.rwMu.Lock()
 	defer t.rwMu.Unlock()
@@ -347,12 +352,13 @@ func (t *TaskPool) cleanUp() {
 	}
 }
 
-// 打印 runtime 的错误栈消息
+// printStackInfo 打印 runtime 的错误栈消息
 func (t *TaskPool) printStackInfo(funcName string, shorErr interface{}) {
 	errBytes := debug.Stack()
 	t.printf(levelError, "funcName: %s, shortErr: %v, stackErr: %s", funcName, shorErr, string(errBytes))
 }
 
+// print
 func (t *TaskPool) print(level logLevel, v string) {
 	if level == levelError {
 		t.log.Error(t.poolName, v)
@@ -361,6 +367,7 @@ func (t *TaskPool) print(level logLevel, v string) {
 	t.log.Info(t.poolName, v)
 }
 
+// printf
 func (t *TaskPool) printf(level logLevel, format string, v ...interface{}) {
 	argsLen := len(v) + 1
 	args := make([]interface{}, argsLen)
@@ -379,7 +386,7 @@ func (t *TaskPool) printf(level logLevel, format string, v ...interface{}) {
 	t.log.Infof("%s "+format, args...)
 }
 
-// 关闭协程池, 注意: 每次调用完一定要释放
+// Close 关闭协程池, 注意: 每次调用完一定要释放
 func (t *TaskPool) Close() {
 	t.cancel()
 	// 将空闲队列释放
@@ -388,18 +395,21 @@ func (t *TaskPool) Close() {
 	atomic.StoreInt32(&t.isClosed, closed)
 }
 
+// Running 获取运行 worker 数量
 func (t *TaskPool) Running() int32 {
 	t.rwMu.RLock()
 	defer t.rwMu.RUnlock()
 	return t.running
 }
 
+// Blocking 获取阻塞的 worker 数量
 func (t *TaskPool) Blocking() int32 {
 	t.rwMu.RLock()
 	defer t.rwMu.RUnlock()
 	return t.blocking
 }
 
+// FreeWorkerQueueLen 空闲队列池里的长度
 func (t *TaskPool) FreeWorkerQueueLen() int {
 	t.rwMu.RLock()
 	defer t.rwMu.RUnlock()
