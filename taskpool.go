@@ -239,7 +239,7 @@ func (t *TaskPool) freeWorkerQueueAppend(w *worker) (isGiveUp bool) {
 
 	curTime := time.Now().Unix()
 	// 如果存活时间到了就直接丢掉
-	if curTime > w.startTime+t.workerMaxLifeCycle {
+	if curTime-w.startTime > t.workerMaxLifeCycle {
 		t.print(levelInfo, "current goroutine is expire, it is give up")
 		return true
 	}

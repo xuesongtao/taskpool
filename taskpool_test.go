@@ -50,7 +50,7 @@ func testTask() {
 }
 
 func testTaskArg(id int) {
-	log.Printf("开始执行任务的time: %v\n", time.Now().Format("2006-01-02 15:04:05.000"))
+	log.Printf("开始执行任务的time: %v", time.Now().Format("2006-01-02 15:04:05.000"))
 	s := time.Duration(rand.Intn(5))
 	time.Sleep(s * time.Second)
 	log.Printf("执行任务结束的time: %v, num: %d 任务运行时间: %d\n", time.Now().Format("2006-01-02 15:04:05.000"), id, s)
@@ -65,7 +65,7 @@ func TestGetGoId(t *testing.T) {
 }
 
 func TestNewTaskPool_NoArg(t *testing.T) {
-	p := NewTaskPool("test", 2, WithWorkerMaxLifeCycle(2), WithPolTime(10*time.Second))
+	p := NewTaskPool("test", 2, WithWorkerMaxLifeCycle(2), WithPolTime(time.Second))
 	// p := NewTaskPool("test", 2, WithWorkerMaxLifeCycle(2))
 	defer p.Close()
 	for i := 0; i < 5; i++ {
@@ -73,7 +73,6 @@ func TestNewTaskPool_NoArg(t *testing.T) {
 		go p.Submit(testTask)
 	}
 	wg.Wait()
-	time.Sleep(2 * time.Minute)
 }
 
 func TestNewTaskPool_HaveArg(t *testing.T) {
@@ -137,5 +136,4 @@ func BenchmarkNewTaskPool_NoArg(b *testing.B) {
 		go p.Submit(testTask)
 	}
 	wg.Wait()
-	time.Sleep(2 * time.Second)
 }
