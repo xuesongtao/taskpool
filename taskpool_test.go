@@ -15,6 +15,7 @@ func init() {
 	// pprofHandler.Handle("/debug/pprof/", http.HandlerFunc(pprof.Index))
 	// server := &http.Server{Addr: "8888", Handler: pprofHandler}
 	// go server.ListenAndServe()
+	
 }
 
 func GoId() (gid string) {
