@@ -2,18 +2,12 @@ package taskpool
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
-)
-
-type (
-	sec            = int64
-	logLevel       int
-	taskFunc       func()
-	TaskPoolOption func(p *TaskPool)
 )
 
 const (
@@ -28,6 +22,13 @@ const (
 	// 日志
 	levelInfo logLevel = iota
 	levelError
+)
+
+type (
+	sec            = int64
+	logLevel       int
+	taskFunc       func()
+	TaskPoolOption func(p *TaskPool)
 )
 
 // WithPoolLogger 设置日志 log
@@ -60,6 +61,7 @@ func WithProGoWorker() TaskPoolOption {
 
 // worker 工作者
 type worker struct {
+	workNo    string          // work 编号
 	ctx       context.Context // 用于传递关闭信号
 	startTime int64           // 记录开始的时间
 	taskCh    chan taskFunc
@@ -68,9 +70,8 @@ type worker struct {
 // newWorker
 func newWorker(ctx context.Context) *worker {
 	return &worker{
-		ctx:       ctx,
-		startTime: time.Now().Unix(),
-		taskCh:    make(chan taskFunc),
+		ctx:    ctx,
+		taskCh: make(chan taskFunc),
 	}
 }
 
@@ -82,27 +83,31 @@ func (w *worker) goWorker(pool *TaskPool) {
 			// 放会池中
 			pool.workerCache.Put(w)
 			if err := recover(); err != nil {
-				pool.printStackInfo("goWorker", err)
+				pool.printStackInfo(fmt.Sprintf("goWorker [%s]", w.workNo), err)
 			}
 		}()
+
+		// 保存 goroutine 编号
+		w.workNo = getGoId()
+		pool.printf(levelInfo, "gen worker [%s] is ok", w.workNo)
 		for {
 			select {
 			case f := <-w.taskCh:
 				if f == nil {
-					pool.print(levelInfo, "exit goWorker")
+					pool.printf(levelInfo, "exit goWorker [%s]", w.workNo)
 					return
 				}
 				f()
 
 				// 放入 freeWorkerQueue 为了后面复用
-				if isGiveUp := pool.freeWorkerQueueAppend(w); isGiveUp {
+				if isGiveUp := pool.freeWorkerQueueAppend(w, true); isGiveUp {
 					return
 				}
 
 				// 通知阻塞的去取
 				pool.cond.Signal()
 			case <-w.ctx.Done():
-				pool.print(levelInfo, "task pool is closed, worker is closed")
+				pool.printf(levelInfo, "task pool is close, worker [%s] need close", w.workNo)
 				return
 			}
 		}
@@ -128,7 +133,7 @@ type TaskPool struct {
 	cond               *sync.Cond
 }
 
-// NewTaskPool 通过此方法内部创建 ctx, 只能通过 Close() 来关闭协程池
+// NewTaskPool 通过此方法内部创建 ctx, 需要通过 Close() 来关闭协程池, 防止协程泄露
 func NewTaskPool(poolName string, capacity int, opts ...TaskPoolOption) *TaskPool {
 	ctx, cancel := context.WithCancel(context.Background())
 	if capacity <= 0 || capacity >= 9999 {
@@ -161,57 +166,71 @@ func NewTaskPool(poolName string, capacity int, opts ...TaskPoolOption) *TaskPoo
 	// 1.用于定时唤醒阻塞队列
 	// 2.定时删除生命到期了的 worker
 	go t.poolSentinel(ctx)
-	t.printf(levelInfo, "create taskPool is success, capacity: %d", t.capacity)
+	t.printf(levelInfo, "create taskPool is success, clean worker time for %d sec, capacity: %d", t.workerMaxLifeCycle, t.capacity)
 	return t
 }
 
 // preGoWorker 预先分配
 func (t *TaskPool) preGoWorker() {
 	for i := 0; i < t.capacity; i++ {
-		w := t.workerCache.Get().(*worker)
-		w.goWorker(t)
-		t.freeWorkerQueueAppend(w)
+		t.freeWorkerQueueAppend(t.genGo(), false)
 		t.running++
 	}
+}
+
+// genGo 生成 goroutine
+func (t *TaskPool) genGo() *worker {
+	w := t.workerCache.Get().(*worker)
+	w.startTime = time.Now().Unix()
+	w.goWorker(t)
+	return w
 }
 
 // Submit 对外通过此方法向协程池添加任务
 // 使用:
 // 		1. 如果任务为 func() 的话可以直接传入,
 // 		2. 如果带参的 func 需要包裹下, 如: test(1, 2, 3) => func() {test(1, 2, 3)}
-func (t *TaskPool) Submit(task taskFunc) {
+func (t *TaskPool) Submit(task taskFunc, async ...bool) {
 	if atomic.LoadInt32(&t.isClosed) == closed {
 		t.print(levelError, "task pool is closed")
 		return
 	}
-	w := t.getFreeWorker()
-	w.taskCh <- task
+
+	// 异步提交
+	if len(async) > 0 && async[0] {
+		go func() {
+			w := t.getFreeWorker()
+			w.taskCh <- task
+		}()
+	} else {
+		w := t.getFreeWorker()
+		w.taskCh <- task
+	}
 }
 
-// getFreeWorker 生成 goroutine, 如果运行的数量大于等于最大数目的时候进行阻塞
+// getFreeWorker 获取 goroutine, 如果运行的数量大于等于最大数目的时候进行阻塞
 func (t *TaskPool) getFreeWorker() (w *worker) {
-	runFunc := func() {
-		w = t.workerCache.Get().(*worker)
-		w.goWorker(t)
-	}
 	t.rwMu.Lock()
 rePop:
-	w = t.freeWorkerQueueLPop()
-	if w != nil {
+	// 处理流程:
+	// 1. 先从空闲队列取
+	// 2. 如果运行的 goroutine 小于 容量就直接创建 goroutine
+	// 3. 进行阻塞处理, 后台有个哨兵进行唤醒
+	if w = t.freeWorkerQueueLPop(false); w != nil {
 		t.rwMu.Unlock()
 	} else if int(t.running) < t.capacity {
 		t.running++
 		t.rwMu.Unlock()
-		runFunc()
+		w = t.genGo()
 	} else {
 		t.blocking++
-		t.printf(levelInfo, "enter wait: running: %d, blocking: %d, freeWorkerLen: %v", t.running, t.blocking, len(t.freeWorkerQueue))
+		// t.printf(levelInfo, "pool enter wait [running: %d, blocking: %d, freeWorkerLen: %d]", t.running, t.blocking, len(t.freeWorkerQueue))
 		// 有一个哨兵间隔 t.polTime 轮询, 根据 freeWorkerQueue 是否有空闲的 worker 进行唤醒
 		t.cond.Wait()
 		t.blocking--
 
 		// 从 freeWorkerQueue 获取 worker, 如果有就返回, 没有的话就从新走下流程
-		w = t.freeWorkerQueueLPop()
+		w = t.freeWorkerQueueLPop(false)
 		if w == nil {
 			goto rePop
 		}
@@ -221,7 +240,12 @@ rePop:
 }
 
 // freeWorkerQueueLPop 从 freeWorkerQueue 头取一个 worker
-func (t *TaskPool) freeWorkerQueueLPop() (w *worker) {
+func (t *TaskPool) freeWorkerQueueLPop(needLock bool) (w *worker) {
+	if needLock {
+		t.rwMu.Lock()
+		defer t.rwMu.Unlock()
+	}
+
 	l := len(t.freeWorkerQueue)
 	if l == 0 {
 		return nil
@@ -233,14 +257,16 @@ func (t *TaskPool) freeWorkerQueueLPop() (w *worker) {
 }
 
 // freeWorkerQueueAppend 归还 worker, 从 freeWorkerQueue 尾部追加
-func (t *TaskPool) freeWorkerQueueAppend(w *worker) (isGiveUp bool) {
-	t.rwMu.Lock()
-	defer t.rwMu.Unlock()
+func (t *TaskPool) freeWorkerQueueAppend(w *worker, needLock bool) (isGiveUp bool) {
+	if needLock {
+		t.rwMu.Lock()
+		defer t.rwMu.Unlock()
+	}
 
 	curTime := time.Now().Unix()
 	// 如果存活时间到了就直接丢掉
 	if curTime-w.startTime > t.workerMaxLifeCycle {
-		t.print(levelInfo, "current goroutine is expire, it is give up")
+		t.printf(levelInfo, "worker [%s] is expire, it is give up", w.workNo)
 		return true
 	}
 
@@ -271,7 +297,7 @@ func (t *TaskPool) poolSentinel(ctx context.Context) {
 			t.awaken()
 
 			if timeVal.Unix()-t.lastCleanUpTime > cleanUpTime {
-				t.cleanUp()
+				t.cleanUp(false)
 				t.lastCleanUpTime = time.Now().Unix()
 			}
 		case <-ctx.Done():
@@ -313,7 +339,7 @@ func (t *TaskPool) awaken() {
 }
 
 // cleanUp 清理生命周期到期的 worker
-func (t *TaskPool) cleanUp() {
+func (t *TaskPool) cleanUp(isSafeClose bool) {
 	t.rwMu.Lock()
 	defer t.rwMu.Unlock()
 
@@ -321,14 +347,15 @@ func (t *TaskPool) cleanUp() {
 	l := len(t.freeWorkerQueue)
 
 	// 避免池子没有任务也打印日志
-	if l > 0 || t.running > 0 || t.blocking > 0 {
-		t.printf(levelInfo, "sentinel clean up, freeWorker count: %d, running: %d, blocking: %d", l, t.running, t.blocking)
+	if !isSafeClose && (l > 0 || t.running > 0 || t.blocking > 0) {
+		t.printf(levelInfo, "sentinel clean up [freeWorker: %d, running: %d, blocking: %d]", l, t.running, t.blocking)
 	}
 	if l == 0 {
 		return
 	}
 
-	// 每轮只清理一个就退出, 保证尽可能多的worker执行
+	// 1. 如果是后台哨兵处理时, 每轮只清理一个就退出, 保证尽可能多的worker执行
+	// 2. 如果是调用 SafeClose() 就一次处理完
 	expireAtIndex := -1
 	for index, w := range t.freeWorkerQueue {
 		if curTimestamp > w.startTime+t.workerMaxLifeCycle {
@@ -352,9 +379,8 @@ func (t *TaskPool) cleanUp() {
 }
 
 // printStackInfo 打印 runtime 的错误栈消息
-func (t *TaskPool) printStackInfo(funcName string, shorErr interface{}) {
-	errBytes := debug.Stack()
-	t.printf(levelError, "funcName: %s, shortErr: %v, stackErr: %s", funcName, shorErr, string(errBytes))
+func (t *TaskPool) printStackInfo(funcName string, shortErr interface{}) {
+	t.printf(levelError, "funcName: %s, shortErr: %v, stackErr: %s", funcName, shortErr, string(debug.Stack()))
 }
 
 // print
@@ -385,13 +411,49 @@ func (t *TaskPool) printf(level logLevel, format string, v ...interface{}) {
 	t.log.Infof("%s "+format, args...)
 }
 
-// Close 关闭协程池, 注意: 每次调用完一定要释放
+// Close 关闭协程池, 外部推荐使用 SafeClose
+// 注意: 每次调用完一定要释放
 func (t *TaskPool) Close() {
 	t.cancel()
 	// 将空闲队列释放
 	t.freeWorkerQueue = nil
 	// 修改标记位
 	atomic.StoreInt32(&t.isClosed, closed)
+}
+
+// SafeClose 安全的关闭, 这样可以保证未处理的任务都执行完
+func (t *TaskPool) SafeClose(timeout ...time.Duration) {
+	var (
+		ctx    = context.Background()
+		cancel context.CancelFunc
+	)
+	if len(timeout) > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), timeout[0])
+		defer cancel()
+	}
+
+	// 将过期时间设置为 1 秒, 执行完了就再回收时(freeWorkerQueueAppend)就直接舍弃掉
+	t.workerMaxLifeCycle = sec(1)
+	for {
+		// 超时退出
+		select {
+		case <-ctx.Done():
+			t.printf(levelInfo, "task pool have %d working", t.running)
+			t.Close()
+			break
+		default:
+		}
+
+		// 1. 全部都空闲就直接关闭
+		// 2. 没有跑的 goroutine 也可以直接退出
+		if len(t.freeWorkerQueue) == t.capacity || t.running == 0 {
+			t.Close()
+			break
+		}
+
+		// 清理空闲队列
+		t.cleanUp(true)
+	}
 }
 
 // Running 获取运行 worker 数量
@@ -413,4 +475,23 @@ func (t *TaskPool) FreeWorkerQueueLen() int {
 	t.rwMu.RLock()
 	defer t.rwMu.RUnlock()
 	return len(t.freeWorkerQueue)
+}
+
+// getGoId 获取 goroutine id
+func getGoId() (gid string) {
+	var (
+		buf     [21]byte
+		idBytes [5]byte
+	)
+	size := runtime.Stack(buf[:], false)
+	// 如: goroutine 8 [running]
+	j := 0
+	for i := 0; i < size; i++ {
+		v := buf[i]
+		if v >= '0' && v <= '9' {
+			idBytes[j] = v
+			j++
+		}
+	}
+	return string(idBytes[:])
 }

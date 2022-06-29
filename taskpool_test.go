@@ -1,6 +1,7 @@
 package taskpool
 
 import (
+	"fmt"
 	"log"
 	"math/rand"
 	"runtime"
@@ -8,6 +9,39 @@ import (
 	"testing"
 	"time"
 )
+
+func TestTmp(t *testing.T) {
+	a := make([]int, 0, 10)
+	var (
+		wg   sync.WaitGroup
+		lock sync.Mutex
+	)
+
+	wg.Add(2)
+	go func() {
+		lock.Lock()
+		defer wg.Done()
+
+		for i := 0; i < 10; i++ {
+			time.Sleep(time.Second)
+			a = append(a, i)
+		}
+		lock.Unlock()
+	}()
+
+	go func() {
+		lock.Lock()
+		defer wg.Done()
+
+		time.Sleep(time.Second)
+		for _, v := range a {
+			// b := <-v
+			fmt.Println("go2:", v)
+		}
+		lock.Unlock()
+	}()
+	wg.Wait()
+}
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
@@ -17,77 +51,48 @@ func init() {
 	// go server.ListenAndServe()
 }
 
-func GoId() (gid string) {
-	var (
-		buf     [21]byte
-		idBytes [5]byte
-	)
-	size := runtime.Stack(buf[:], false)
-
-	// 如: goroutine 8 [running]
-	j := 0
-	for i := 0; i < size; i++ {
-		v := buf[i]
-		if v >= '0' && v <= '9' {
-			idBytes[j] = v
-			j++
-		}
-	}
-	return string(idBytes[:])
-}
-
-var (
-	wg sync.WaitGroup
-)
-
-func testTask() {
-	randInt := time.Duration(rand.Intn(5))
-	gid := GoId()
-	log.Printf("开始执行任务的time: %v, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), gid)
-	time.Sleep(randInt * time.Second)
-	log.Printf("执行任务结束的time: %v, task hello world, 任务运行时间: %d, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), randInt, gid)
-	wg.Done()
-}
-
-func testTaskArg(id int) {
-	log.Printf("开始执行任务的time: %v", time.Now().Format("2006-01-02 15:04:05.000"))
-	s := time.Duration(rand.Intn(5))
-	time.Sleep(s * time.Second)
-	log.Printf("执行任务结束的time: %v, num: %d 任务运行时间: %d\n", time.Now().Format("2006-01-02 15:04:05.000"), id, s)
-	wg.Done()
-}
-
 func TestGetGoId(t *testing.T) {
 	defer func() {
-		t.Log(GoId())
+		t.Log(getGoId())
 	}()
 	panic("hello")
 }
 
 func TestNewTaskPool_NoArg(t *testing.T) {
 	p := NewTaskPool("test", 2, WithWorkerMaxLifeCycle(2), WithPolTime(time.Second))
-	// p := NewTaskPool("test", 2, WithWorkerMaxLifeCycle(2))
-	defer p.Close()
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go p.Submit(testTask)
+	defer p.SafeClose()
+
+	fn := func() {
+		randInt := time.Duration(rand.Intn(5))
+		gid := getGoId()
+		fmt.Printf(">>开始执行任务的time: %v, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), gid)
+		time.Sleep(randInt * time.Second)
+		fmt.Printf(">>执行任务结束的time: %v, 任务运行时间: %d sec, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), randInt, gid)
 	}
-	wg.Wait()
+	for i := 0; i < 5; i++ {
+		p.Submit(fn)
+	}
 }
 
 func TestNewTaskPool_HaveArg(t *testing.T) {
 	p := NewTaskPool("test", 2)
-	defer p.Close()
+	defer p.SafeClose()
 	log.Printf("curtime: %v\n", time.Now().Format("2006-01-02 15:04:05.000"))
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go p.Submit(func() {
-			func(i int) {
-				testTaskArg(i)
-			}(i)
-		})
+
+	fn := func(id int) {
+		fmt.Printf(">>开始执行任务的time: %v\n", time.Now().Format("2006-01-02 15:04:05.000"))
+		s := time.Duration(rand.Intn(5))
+		time.Sleep(s * time.Second)
+		fmt.Printf(">>执行任务结束的time: %v, num: %d 任务运行时间: %d\n", time.Now().Format("2006-01-02 15:04:05.000"), id, s)
 	}
-	wg.Wait()
+
+	for i := 0; i < 5; i++ {
+		p.Submit(func() {
+			func(i int) {
+				fn(i)
+			}(i)
+		}, true)
+	}
 	time.Sleep(time.Second * 10)
 }
 
@@ -98,19 +103,16 @@ func TestLogInfo(t *testing.T) {
 	p.printf(levelInfo, "name: %s, age: %d", "xue", 18)
 }
 
-func TestNewTaskPool_Close(t *testing.T) {
+func TestNewTaskPool_SafeClose(t *testing.T) {
 	p := NewTaskPool("test", 2)
-	defer p.Close()
+	defer p.SafeClose()
+
 	for i := 0; i < 10; i++ {
-		t.Logf("i: %v\n", i)
-		if i == 6 {
-			p.Close()
-		}
+		time.Sleep(time.Second)
 		p.Submit(func() {
-			log.Println("task")
+			fmt.Printf("time: %v, i: %d\n", time.Now().Format("2006-01-02 15:04:05.000"), i)
 		})
 	}
-	time.Sleep(time.Second * 2)
 }
 
 func TestPanicDemo(t *testing.T) {
@@ -128,12 +130,163 @@ func TestPanicDemo(t *testing.T) {
 	}
 }
 
-func BenchmarkNewTaskPool_NoArg(b *testing.B) {
-	p := NewTaskPool("test", 500, WithProGoWorker())
-	defer p.Close()
-	for i := 0; i < 5000; i++ {
-		wg.Add(1)
-		go p.Submit(testTask)
+// 通过 append 进行删除达到复用
+func TestAppend1(t *testing.T) {
+	demos := make([]int, 0, 10)
+	for i := 0; i < 10; i++ {
+		demos = append(demos, i)
 	}
-	wg.Wait()
+	// 初始地址
+	ptr1 := fmt.Sprintf("%p", demos)
+	t.Logf("demos: %v, ptr1: %v", demos, ptr1)
+
+	// 删除第一个
+	demos = append(demos[:0], demos[1:]...)
+	if ptr := fmt.Sprintf("%p", demos); ptr1 != ptr {
+		t.Error("re allot addr, ptr2:", ptr)
+	} else {
+		t.Log("删除第一个, demos:", demos)
+	}
+	// 追加一个
+	demos = append(demos, 10)
+	if ptr := fmt.Sprintf("%p", demos); ptr1 != ptr {
+		t.Error("re allot addr, ptr3:", ptr)
+	} else {
+		t.Log("追加一个, demos:", demos)
+	}
+
+	// 删除最后一个
+	demos = append(demos[:0], demos[:len(demos)-1]...)
+	if ptr := fmt.Sprintf("%p", demos); ptr1 != ptr {
+		t.Error("re allot addr, ptr3:", ptr)
+	} else {
+		t.Log("删除最后一个, demos:", demos)
+	}
+	// 追加一个
+	demos = append(demos, 11)
+	if ptr := fmt.Sprintf("%p", demos); ptr1 != ptr {
+		t.Error("re allot addr, ptr3:", ptr)
+	} else {
+		t.Log("追加一个, demos:", demos)
+	}
+
+	// 删除第3个
+	demos = append(demos[:2], demos[3:]...)
+	if ptr := fmt.Sprintf("%p", demos); ptr1 != ptr {
+		t.Error("re allot addr, ptr3:", ptr)
+	} else {
+		t.Log("删除第3个, demos:", demos)
+	}
+	// 追加一个
+	demos = append(demos, 12)
+	if ptr := fmt.Sprintf("%p", demos); ptr1 != ptr {
+		t.Error("re allot addr, ptr3:", ptr)
+	} else {
+		t.Log("追加一个, demos:", demos)
+	}
+}
+
+// 通过切片操作
+func TestAppend2(t *testing.T) {
+	demos := make([]int, 0, 10)
+	for i := 0; i < 10; i++ {
+		demos = append(demos, i)
+	}
+	// 初始地址
+	ptr1 := fmt.Sprintf("%p", demos)
+	t.Logf("demos: %v, ptr1: %v", demos, ptr1)
+
+	// 删除第一个
+	demos = demos[1:]
+	if ptr := fmt.Sprintf("%p", demos); ptr1 != ptr {
+		t.Error("re allot addr, ptr2:", ptr)
+	} else {
+		t.Log("删除第一个, demos:", demos)
+	}
+	// 追加一个
+	demos = append(demos, 10)
+	if ptr := fmt.Sprintf("%p", demos); ptr1 != ptr {
+		t.Error("re allot addr, ptr3:", ptr)
+	} else {
+		t.Log("追加一个, demos:", demos)
+	}
+
+	// 删除最后一个
+	demos = demos[:len(demos)-1]
+	if ptr := fmt.Sprintf("%p", demos); ptr1 != ptr {
+		t.Error("re allot addr, ptr3:", ptr)
+	} else {
+		t.Log("删除最后一个, demos:", demos)
+	}
+	// 追加一个
+	demos = append(demos, 11)
+	if ptr := fmt.Sprintf("%p", demos); ptr1 != ptr {
+		t.Error("re allot addr, ptr3:", ptr)
+	} else {
+		t.Log("追加一个, demos:", demos)
+	}
+
+	// 删除第3个
+	demos = append(demos[:2], demos[3:]...)
+	if ptr := fmt.Sprintf("%p", demos); ptr1 != ptr {
+		t.Error("re allot addr, ptr3:", ptr)
+	} else {
+		t.Log("删除第3个, demos:", demos)
+	}
+	// 追加一个
+	demos = append(demos, 12)
+	if ptr := fmt.Sprintf("%p", demos); ptr1 != ptr {
+		t.Error("re allot addr, ptr3:", ptr)
+	} else {
+		t.Log("追加一个, demos:", demos)
+	}
+}
+
+func BenchmarkA1(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		demos := make([]int, 0, 10)
+		for i := 0; i < 10; i++ {
+			demos = append(demos, i)
+		}
+
+		// 删除第一个
+		demos = append(demos[:0], demos[1:]...)
+		// 追加一个
+		demos = append(demos, 10)
+
+		// 删除最后一个
+		demos = append(demos[:0], demos[:len(demos)-1]...)
+		// 追加一个
+		demos = append(demos, 11)
+
+		// 删除第3个
+		demos = append(demos[:2], demos[3:]...)
+		// 追加一个
+		demos = append(demos, 12)
+	}
+}
+
+func BenchmarkA2(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		demos := make([]int, 0, 10)
+		for i := 0; i < 10; i++ {
+			demos = append(demos, i)
+		}
+		// 初始地址
+
+		// 删除第一个
+		demos = demos[1:]
+		// 追加一个
+		demos = append(demos, 10)
+
+		// 删除最后一个
+		demos = demos[:len(demos)-1]
+		// 追加一个
+		demos = append(demos, 11)
+
+		// 删除第3个
+		demos = append(demos[:2], demos[3:]...)
+		// 追加一个
+		demos = append(demos, 12)
+	}
 }
