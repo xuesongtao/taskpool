@@ -9,7 +9,7 @@
 
 ```
     pushPool := lib.NewTaskPool("poolName", 10, lib.WithProGoWorker())
-    defer pushPool.Close()
+    defer pushPool.SafeClose() // 局部使用需要使用这个进行 Close()
 
     everyTaskHandleSum := 500
     l := 50000

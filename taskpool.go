@@ -411,8 +411,11 @@ func (t *TaskPool) printf(level logLevel, format string, v ...interface{}) {
 	t.log.Infof("%s "+format, args...)
 }
 
-// Close 关闭协程池, 外部推荐使用 SafeClose
-// 注意: 每次调用完一定要释放
+// Close 关闭协程池,
+// 
+// 注意:
+//     1. 每次调用完一定要释放
+//     2. 局部使用外部推荐使用 SafeClose, 防止任务未执行完就退出
 func (t *TaskPool) Close() {
 	t.cancel()
 	// 将空闲队列释放
