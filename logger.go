@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-type cjLogger interface {
+type Logger interface {
 	Info(v ...interface{})
 	Infof(format string, v ...interface{})
 	Error(v ...interface{})

@@ -32,7 +32,7 @@ type (
 )
 
 // WithPoolLogger 设置日志 log
-func WithPoolLogger(logger cjLogger) TaskPoolOption {
+func WithPoolLogger(logger Logger) TaskPoolOption {
 	return func(p *TaskPool) {
 		p.log = logger
 	}
@@ -122,7 +122,7 @@ type TaskPool struct {
 	isClosed           int32         // cancel() 后设置为 ture
 	capacity           int           // 最大工作数
 	poolName           string        // 任务池的名称, 用日志记录前缀
-	log                cjLogger      // log
+	log                Logger        // log
 	polTime            time.Duration // 哨兵默认轮询时间
 	lastCleanUpTime    int64         // 上一次哨兵清理 worker 的时间
 	workerMaxLifeCycle sec           // worker 最大存活周期(单位: 秒)
