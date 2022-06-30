@@ -61,9 +61,9 @@ func WithProGoWorker() TaskPoolOption {
 
 // worker 工作者
 type worker struct {
-	workNo    string          // work 编号
 	ctx       context.Context // 用于传递关闭信号
 	startTime int64           // 记录开始的时间
+	workNo    string          // work 编号
 	taskCh    chan taskFunc
 }
 
