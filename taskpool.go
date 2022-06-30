@@ -61,9 +61,9 @@ func WithProGoWorker() TaskPoolOption {
 
 // worker 工作者
 type worker struct {
-	workNo    string          // work 编号
 	ctx       context.Context // 用于传递关闭信号
 	startTime int64           // 记录开始的时间
+	workNo    string          // work 编号
 	taskCh    chan taskFunc
 }
 
@@ -83,7 +83,7 @@ func (w *worker) goWorker(pool *TaskPool) {
 			// 放会池中
 			pool.workerCache.Put(w)
 			if err := recover(); err != nil {
-				pool.printStackInfo(fmt.Sprintf("goWorker [%s]", w.workNo), err)
+				pool.printStackInfo(fmt.Sprintf("worker [%s]", w.workNo), err)
 			}
 		}()
 
@@ -94,20 +94,21 @@ func (w *worker) goWorker(pool *TaskPool) {
 			select {
 			case f := <-w.taskCh:
 				if f == nil {
-					pool.printf(levelInfo, "exit goWorker [%s]", w.workNo)
+					pool.printf(levelInfo, "pool clean up worker [%s] exit", w.workNo)
 					return
 				}
 				f()
 
 				// 放入 freeWorkerQueue 为了后面复用
 				if isGiveUp := pool.freeWorkerQueueAppend(w, true); isGiveUp {
+					pool.printf(levelInfo, "worker [%s] is expire, it is give up", w.workNo)
 					return
 				}
 
 				// 通知阻塞的去取
 				pool.cond.Signal()
 			case <-w.ctx.Done():
-				pool.printf(levelInfo, "task pool is close, worker [%s] need close", w.workNo)
+				pool.printf(levelInfo, "pool close worker [%s] exit", w.workNo)
 				return
 			}
 		}
@@ -266,7 +267,6 @@ func (t *TaskPool) freeWorkerQueueAppend(w *worker, needLock bool) (isGiveUp boo
 	curTime := time.Now().Unix()
 	// 如果存活时间到了就直接丢掉
 	if curTime-w.startTime > t.workerMaxLifeCycle {
-		t.printf(levelInfo, "worker [%s] is expire, it is give up", w.workNo)
 		return true
 	}
 

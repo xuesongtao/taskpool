@@ -5,42 +5,12 @@ import (
 	"log"
 	"math/rand"
 	"runtime"
-	"sync"
 	"testing"
 	"time"
 )
 
 func TestTmp(t *testing.T) {
-	a := make([]int, 0, 10)
-	var (
-		wg   sync.WaitGroup
-		lock sync.Mutex
-	)
 
-	wg.Add(2)
-	go func() {
-		lock.Lock()
-		defer wg.Done()
-
-		for i := 0; i < 10; i++ {
-			time.Sleep(time.Second)
-			a = append(a, i)
-		}
-		lock.Unlock()
-	}()
-
-	go func() {
-		lock.Lock()
-		defer wg.Done()
-
-		time.Sleep(time.Second)
-		for _, v := range a {
-			// b := <-v
-			fmt.Println("go2:", v)
-		}
-		lock.Unlock()
-	}()
-	wg.Wait()
 }
 
 func init() {
@@ -80,10 +50,11 @@ func TestNewTaskPool_HaveArg(t *testing.T) {
 	log.Printf("curtime: %v\n", time.Now().Format("2006-01-02 15:04:05.000"))
 
 	fn := func(id int) {
-		fmt.Printf(">>开始执行任务的time: %v\n", time.Now().Format("2006-01-02 15:04:05.000"))
+		gid := getGoId()
+		fmt.Printf(">>开始执行任务的time: %v, gid: %v\n", time.Now().Format("2006-01-02 15:04:05.000"), gid)
 		s := time.Duration(rand.Intn(5))
 		time.Sleep(s * time.Second)
-		fmt.Printf(">>执行任务结束的time: %v, num: %d 任务运行时间: %d\n", time.Now().Format("2006-01-02 15:04:05.000"), id, s)
+		fmt.Printf(">>执行任务结束的time: %v, num: %d 任务运行时间: %d, gid:%v\n", time.Now().Format("2006-01-02 15:04:05.000"), id, s, gid)
 	}
 
 	for i := 0; i < 5; i++ {
@@ -94,6 +65,7 @@ func TestNewTaskPool_HaveArg(t *testing.T) {
 		}, true)
 	}
 	time.Sleep(time.Second * 10)
+	p.SafeClose()
 }
 
 func TestLogInfo(t *testing.T) {
@@ -129,6 +101,27 @@ func TestPanicDemo(t *testing.T) {
 		}
 	}
 }
+
+func TestQueueChange(t *testing.T) {
+	p := NewTaskPool("test", 20)
+	defer p.SafeClose()
+	ptr := fmt.Sprintf("%p", p.freeWorkerQueue)
+
+	fn := func() {
+		randInt := time.Duration(rand.Intn(5))
+		gid := getGoId()
+		fmt.Printf(">>开始执行任务的time: %v, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), gid)
+		time.Sleep(randInt * time.Second)
+		fmt.Printf(">>执行任务结束的time: %v, 任务运行时间: %d sec, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), randInt, gid)
+	}
+	for i := 0; i < 500; i++ {
+		if ptrAddr := fmt.Sprintf("%p", p.freeWorkerQueue); ptrAddr != ptr {
+			t.Fatal("ptrAddr is change")
+		}
+		p.Submit(fn)
+	}
+}
+
 
 // 通过 append 进行删除达到复用
 func TestAppend1(t *testing.T) {
