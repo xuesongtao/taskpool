@@ -80,10 +80,11 @@ func TestNewTaskPool_HaveArg(t *testing.T) {
 	log.Printf("curtime: %v\n", time.Now().Format("2006-01-02 15:04:05.000"))
 
 	fn := func(id int) {
-		fmt.Printf(">>开始执行任务的time: %v\n", time.Now().Format("2006-01-02 15:04:05.000"))
+		gid := getGoId()
+		fmt.Printf(">>开始执行任务的time: %v, gid: %v\n", time.Now().Format("2006-01-02 15:04:05.000"), gid)
 		s := time.Duration(rand.Intn(5))
 		time.Sleep(s * time.Second)
-		fmt.Printf(">>执行任务结束的time: %v, num: %d 任务运行时间: %d\n", time.Now().Format("2006-01-02 15:04:05.000"), id, s)
+		fmt.Printf(">>执行任务结束的time: %v, num: %d 任务运行时间: %d, gid:%v\n", time.Now().Format("2006-01-02 15:04:05.000"), id, s, gid)
 	}
 
 	for i := 0; i < 5; i++ {
@@ -94,6 +95,7 @@ func TestNewTaskPool_HaveArg(t *testing.T) {
 		}, true)
 	}
 	time.Sleep(time.Second * 10)
+	p.SafeClose()
 }
 
 func TestLogInfo(t *testing.T) {
