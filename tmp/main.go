@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gitee.com/xuesongtao/taskpool"
+	"github.com/gogf/gf/frame/g"
 )
 
 func init() {
@@ -39,7 +40,7 @@ func getGoId() (gid string) {
 }
 
 func submit1() {
-	p := taskpool.NewTaskPool("test", 15, taskpool.WithWorkerMaxLifeCycle(2), taskpool.WithPolTime(time.Second))
+	p := taskpool.NewTaskPool("test", 15, taskpool.WithWorkerMaxLifeCycle(2), taskpool.WithPolTime(time.Second), taskpool.WithPoolLogger(g.Log()))
 	defer p.SafeClose()
 
 	fn := func() {
@@ -49,7 +50,7 @@ func submit1() {
 		time.Sleep(randInt * time.Second)
 		fmt.Printf(">>执行任务结束的time: %v, 任务运行时间: %d sec, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), randInt, gid)
 	}
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 5; i++ {
 		p.Submit(fn)
 	}
 }
@@ -72,6 +73,6 @@ func submit2() {
 }
 
 func main() {
-	// submit1()
-	submit2()
+	submit1()
+	// submit2()
 }

@@ -32,7 +32,7 @@ type (
 )
 
 // WithPoolLogger 设置日志 log
-func WithPoolLogger(logger cjLogger) TaskPoolOption {
+func WithPoolLogger(logger Logger) TaskPoolOption {
 	return func(p *TaskPool) {
 		p.log = logger
 	}
@@ -122,7 +122,7 @@ type TaskPool struct {
 	isClosed           int32         // cancel() 后设置为 ture
 	capacity           int           // 最大工作数
 	poolName           string        // 任务池的名称, 用日志记录前缀
-	log                cjLogger      // log
+	log                Logger        // log
 	polTime            time.Duration // 哨兵默认轮询时间
 	lastCleanUpTime    int64         // 上一次哨兵清理 worker 的时间
 	workerMaxLifeCycle sec           // worker 最大存活周期(单位: 秒)
@@ -411,8 +411,11 @@ func (t *TaskPool) printf(level logLevel, format string, v ...interface{}) {
 	t.log.Infof("%s "+format, args...)
 }
 
-// Close 关闭协程池, 外部推荐使用 SafeClose
-// 注意: 每次调用完一定要释放
+// Close 关闭协程池,
+//
+// 注意:
+//     1. 每次调用完一定要释放
+//     2. 局部使用外部推荐使用 SafeClose, 防止任务未执行完就退出
 func (t *TaskPool) Close() {
 	t.cancel()
 	// 将空闲队列释放
