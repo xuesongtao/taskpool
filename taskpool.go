@@ -483,10 +483,11 @@ func (t *TaskPool) FreeWorkerQueueLen() int {
 // getGoId 获取 goroutine id
 func getGoId() (gid string) {
 	var (
-		buf     [21]byte
-		idBytes [5]byte
+		buf     [50]byte
+		idBytes [25]byte
 	)
 	size := runtime.Stack(buf[:], false)
+	// fmt.Println("test:", string(buf[:]))
 	// 如: goroutine 8 [running]
 	j := 0
 	for i := 0; i < size; i++ {
@@ -498,3 +499,4 @@ func getGoId() (gid string) {
 	}
 	return string(idBytes[:])
 }
+
