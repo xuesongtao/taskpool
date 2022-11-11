@@ -9,10 +9,6 @@ import (
 	"time"
 )
 
-func TestTmp(t *testing.T) {
-
-}
-
 func init() {
 	rand.Seed(time.Now().UnixNano())
 	// pprofHandler := http.NewServeMux()
@@ -121,7 +117,6 @@ func TestQueueChange(t *testing.T) {
 		p.Submit(fn)
 	}
 }
-
 
 // 通过 append 进行删除达到复用
 func TestAppend1(t *testing.T) {
