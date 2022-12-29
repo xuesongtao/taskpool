@@ -5,9 +5,14 @@
 * 协程池最少有一个哨兵协程，最多有 maxWork + 1(哨兵)
 * 如果要关闭协程池需要手动释放, 异常情况时会自动释放
 
+
 #### 2. 使用
 
+```go
+go get -u gitee.com/xuesongtao/taskpool
 ```
+
+```go
     pushPool := lib.NewTaskPool("poolName", 10, lib.WithProGoWorker())
     defer pushPool.SafeClose() // 局部使用需要使用这个进行 Close()
 
@@ -27,6 +32,8 @@
         })
     }
 ```
+
+- 其他: 在使用时需要注意闭包引用问题, 在 `_example` 下添加使用示例
 
 #### 最后
 
