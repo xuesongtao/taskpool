@@ -418,8 +418,8 @@ func (t *TaskPool) printf(level logLevel, format string, v ...interface{}) {
 //     2. 局部使用外部推荐使用 SafeClose, 防止任务未执行完就退出
 func (t *TaskPool) Close() {
 	t.cancel()
-	// 将空闲队列释放
-	t.freeWorkerQueue = nil
+	// // 将空闲队列释放
+	// t.freeWorkerQueue = nil
 	// 修改标记位
 	atomic.StoreInt32(&t.isClosed, closed)
 }
@@ -436,7 +436,9 @@ func (t *TaskPool) SafeClose(timeout ...time.Duration) {
 	}
 
 	// 将过期时间设置为 1 秒, 执行完了就再回收时(freeWorkerQueueAppend)就直接舍弃掉
+	t.rwMu.Lock()
 	t.workerMaxLifeCycle = sec(1)
+	t.rwMu.Unlock()
 	for {
 		// 超时退出
 		select {
@@ -449,7 +451,7 @@ func (t *TaskPool) SafeClose(timeout ...time.Duration) {
 
 		// 1. 全部都空闲就直接关闭
 		// 2. 没有跑的 goroutine 也可以直接退出
-		if len(t.freeWorkerQueue) == t.capacity || t.running == 0 {
+		if t.FreeWorkerQueueLen() == t.capacity || t.Running() == 0 {
 			t.Close()
 			break
 		}
@@ -461,16 +463,12 @@ func (t *TaskPool) SafeClose(timeout ...time.Duration) {
 
 // Running 获取运行 worker 数量
 func (t *TaskPool) Running() int32 {
-	t.rwMu.RLock()
-	defer t.rwMu.RUnlock()
-	return t.running
+	return atomic.LoadInt32(&t.running)
 }
 
 // Blocking 获取阻塞的 worker 数量
 func (t *TaskPool) Blocking() int32 {
-	t.rwMu.RLock()
-	defer t.rwMu.RUnlock()
-	return t.blocking
+	return atomic.LoadInt32(&t.blocking)
 }
 
 // FreeWorkerQueueLen 空闲队列池里的长度
@@ -499,4 +497,3 @@ func getGoId() (gid string) {
 	}
 	return string(idBytes[:])
 }
-

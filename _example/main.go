@@ -151,6 +151,6 @@ func main() {
 	// ErrPageDemo()
 	// CorrectPageDemo()
 
-	ErrSliceDemo()
-	// CorrectSliceDemo()
+	// ErrSliceDemo()
+	CorrectSliceDemo()
 }
