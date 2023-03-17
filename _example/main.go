@@ -147,43 +147,6 @@ func CorrectSliceDemo() {
 	// [8 9]
 }
 
-// CorrectSliceDemo1 处理切片
-func CorrectSliceDemo1() {
-	fmt.Println("CorrectSliceDemo start")
-	defer fmt.Println("CorrectSliceDemo end")
-
-	fn := func(src []string) {
-		fmt.Println(src)
-	}
-	tmp := []string{}
-	for i := 0; i < 10; i++ {
-		tmp = append(tmp, fmt.Sprint(i))
-	}
-
-	taskPool := taskpool.NewTaskPool("", 10)
-	size := 2
-	s := 0
-	lastIndex := len(tmp)
-	for s < lastIndex {
-		e := s + size
-		if e > lastIndex {
-			e = lastIndex
-		}
-		taskPool.Submit1(taskpool.NewTask(func() {
-			fn(tmp[s:e])
-		}))
-		s = e
-	}
-	taskPool.SafeClose()
-
-	// Output:
-	// [0 1]
-	// [4 5]
-	// [2 3]
-	// [6 7]
-	// [8 9]
-}
-
 func ErrMapDemo() {
 	type Tmp struct {
 		No int
