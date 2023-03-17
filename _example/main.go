@@ -147,6 +147,43 @@ func CorrectSliceDemo() {
 	// [8 9]
 }
 
+// CorrectSliceDemo1 处理切片
+func CorrectSliceDemo1() {
+	fmt.Println("CorrectSliceDemo start")
+	defer fmt.Println("CorrectSliceDemo end")
+
+	fn := func(src []string) {
+		fmt.Println(src)
+	}
+	tmp := []string{}
+	for i := 0; i < 10; i++ {
+		tmp = append(tmp, fmt.Sprint(i))
+	}
+
+	taskPool := taskpool.NewTaskPool("", 10)
+	size := 2
+	s := 0
+	lastIndex := len(tmp)
+	for s < lastIndex {
+		e := s + size
+		if e > lastIndex {
+			e = lastIndex
+		}
+		taskPool.Submit1(taskpool.NewTask(func() {
+			fn(tmp[s:e])
+		}))
+		s = e
+	}
+	taskPool.SafeClose()
+
+	// Output:
+	// [0 1]
+	// [4 5]
+	// [2 3]
+	// [6 7]
+	// [8 9]
+}
+
 func ErrMapDemo() {
 	type Tmp struct {
 		No int
@@ -157,13 +194,18 @@ func ErrMapDemo() {
 		3: &Tmp{3},
 		4: &Tmp{4},
 	}
-	taskPool := taskpool.NewTaskPool("", 10)
+	taskPool := taskpool.NewTaskPool("", 10, taskpool.WithPoolPrint(false))
 	for k, v := range res {
 		taskPool.Submit(func() {
-			fmt.Printf("key: %d, value: %+v\n", k, v)
+			fmt.Printf("key: %d, value: %d\n", k, v.No)
 		})
 	}
 	taskPool.SafeClose()
+	// Output:
+	// key: 1, value: 1
+	// key: 3, value: 3
+	// key: 3, value: 3
+	// key: 4, value: 4
 }
 
 func CorrectMapDemo() {
@@ -180,10 +222,15 @@ func CorrectMapDemo() {
 	for k, v := range res {
 		k1, v1 := k, v
 		taskPool.Submit(func() {
-			fmt.Printf("key: %d, value: %+v\n", k1, v1)
+			fmt.Printf("key: %d, value: %d\n", k1, v1.No)
 		})
 	}
 	taskPool.SafeClose()
+	// Output:
+	// key: 1, value: 1
+	// key: 2, value: 2
+	// key: 2, value: 2
+	// key: 4, value: 4
 }
 
 func main() {
@@ -192,7 +239,8 @@ func main() {
 
 	// ErrSliceDemo()
 	// CorrectSliceDemo()
+	CorrectSliceDemo1()
 
 	// ErrMapDemo()
-	CorrectMapDemo()
+	// CorrectMapDemo()
 }
