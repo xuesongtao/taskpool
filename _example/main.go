@@ -239,8 +239,7 @@ func main() {
 
 	// ErrSliceDemo()
 	// CorrectSliceDemo()
-	CorrectSliceDemo1()
 
 	// ErrMapDemo()
-	// CorrectMapDemo()
+	CorrectMapDemo()
 }
