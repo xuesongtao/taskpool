@@ -12,7 +12,6 @@ import (
 
 const (
 	// 默认
-	defaultIsPre              bool          = false        // 是否预先分配协程
 	defaultPolDuration        time.Duration = time.Second  // 哨兵默认轮询时间
 	defaultWorkerMaxLifeCycle sec           = 10 * sec(60) // worker 最大存活期(单位: 秒)
 
@@ -150,7 +149,7 @@ func NewTaskPool(poolName string, capacity int, opts ...TaskPoolOption) *TaskPoo
 		capacity = runtime.NumCPU()
 	}
 	t := &TaskPool{
-		isPre:              defaultIsPre,
+		isPre:              true,
 		printLog:           true,
 		capacity:           capacity,
 		poolName:           "(" + poolName + ")",
