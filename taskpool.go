@@ -86,12 +86,12 @@ func newWorker(ctx context.Context) *worker {
 func (w *worker) goWorker(pool *TaskPool) {
 	go func() {
 		defer func() {
-			atomic.AddInt32(&pool.running, -1)
-			// 放会池中
-			pool.workerCache.Put(w)
 			if err := recover(); err != nil {
 				pool.printStackInfo(fmt.Sprintf("worker [%s]", w.workNo), err)
 			}
+			// 放会池中
+			pool.workerCache.Put(w)
+			atomic.AddInt32(&pool.running, -1)
 		}()
 
 		// 保存 goroutine 编号

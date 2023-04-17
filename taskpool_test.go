@@ -72,13 +72,15 @@ func TestLogInfo(t *testing.T) {
 }
 
 func TestNewTaskPool_SafeClose(t *testing.T) {
-	p := NewTaskPool("test", 2)
+	size := 3
+	p := NewTaskPool("test", size)
 	defer p.SafeClose()
 
-	for i := 0; i < 10; i++ {
-		time.Sleep(time.Second)
+	a := map[int]struct{}{}
+	for i := 0; i < size; i++ {
+		tmp := i
 		p.Submit(func() {
-			fmt.Printf("time: %v, i: %d\n", time.Now().Format("2006-01-02 15:04:05.000"), i)
+			a[tmp] = struct{}{}
 		})
 	}
 }
