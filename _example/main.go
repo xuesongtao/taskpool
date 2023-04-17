@@ -147,10 +147,62 @@ func CorrectSliceDemo() {
 	// [8 9]
 }
 
+func ErrMapDemo() {
+	type Tmp struct {
+		No int
+	}
+	res := map[int]*Tmp{
+		1: &Tmp{1},
+		2: &Tmp{2},
+		3: &Tmp{3},
+		4: &Tmp{4},
+	}
+	taskPool := taskpool.NewTaskPool("", 10, taskpool.WithPoolPrint(false))
+	for k, v := range res {
+		taskPool.Submit(func() {
+			fmt.Printf("key: %d, value: %d\n", k, v.No)
+		})
+	}
+	taskPool.SafeClose()
+	// Output:
+	// key: 1, value: 1
+	// key: 3, value: 3
+	// key: 3, value: 3
+	// key: 4, value: 4
+}
+
+func CorrectMapDemo() {
+	type Tmp struct {
+		No int
+	}
+	res := map[int]*Tmp{
+		1: &Tmp{1},
+		2: &Tmp{2},
+		3: &Tmp{3},
+		4: &Tmp{4},
+	}
+	taskPool := taskpool.NewTaskPool("", 10)
+	for k, v := range res {
+		k1, v1 := k, v
+		taskPool.Submit(func() {
+			fmt.Printf("key: %d, value: %d\n", k1, v1.No)
+		})
+	}
+	taskPool.SafeClose()
+	// Output:
+	// key: 1, value: 1
+	// key: 2, value: 2
+	// key: 2, value: 2
+	// key: 4, value: 4
+}
+
 func main() {
 	// ErrPageDemo()
 	// CorrectPageDemo()
 
 	// ErrSliceDemo()
-	CorrectSliceDemo()
+	// CorrectSliceDemo()
+
+	// ErrMapDemo()
+	CorrectMapDemo()
 }

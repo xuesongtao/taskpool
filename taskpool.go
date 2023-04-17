@@ -12,7 +12,6 @@ import (
 
 const (
 	// 默认
-	defaultIsPre              bool          = false        // 是否预先分配协程
 	defaultPolDuration        time.Duration = time.Second  // 哨兵默认轮询时间
 	defaultWorkerMaxLifeCycle sec           = 10 * sec(60) // worker 最大存活期(单位: 秒)
 
@@ -25,9 +24,10 @@ const (
 )
 
 type (
-	sec            = int64
-	logLevel       int
-	taskFunc       func()
+	sec      = int64
+	logLevel int
+	taskFunc func()
+	// taskFuncErr    func() error
 	TaskPoolOption func(p *TaskPool)
 )
 
@@ -35,6 +35,13 @@ type (
 func WithPoolLogger(logger Logger) TaskPoolOption {
 	return func(p *TaskPool) {
 		p.log = logger
+	}
+}
+
+// WithPoolPrint 设置是否打印 log
+func WithPoolPrint(print bool) TaskPoolOption {
+	return func(p *TaskPool) {
+		p.printLog = print
 	}
 }
 
@@ -79,12 +86,12 @@ func newWorker(ctx context.Context) *worker {
 func (w *worker) goWorker(pool *TaskPool) {
 	go func() {
 		defer func() {
-			atomic.AddInt32(&pool.running, -1)
-			// 放会池中
-			pool.workerCache.Put(w)
 			if err := recover(); err != nil {
 				pool.printStackInfo(fmt.Sprintf("worker [%s]", w.workNo), err)
 			}
+			// 放会池中
+			pool.workerCache.Put(w)
+			atomic.AddInt32(&pool.running, -1)
 		}()
 
 		// 保存 goroutine 编号
@@ -118,6 +125,7 @@ func (w *worker) goWorker(pool *TaskPool) {
 // TaskPool 任务池
 type TaskPool struct {
 	isPre              bool          // 是否预先分配协程
+	printLog           bool          // 是否打印 log
 	running            int32         // 正在运行的数量
 	blocking           int32         // 阻塞的个数
 	isClosed           int32         // cancel() 后设置为 ture
@@ -141,7 +149,8 @@ func NewTaskPool(poolName string, capacity int, opts ...TaskPoolOption) *TaskPoo
 		capacity = runtime.NumCPU()
 	}
 	t := &TaskPool{
-		isPre:              defaultIsPre,
+		isPre:              true,
+		printLog:           true,
 		capacity:           capacity,
 		poolName:           "(" + poolName + ")",
 		freeWorkerQueue:    make([]*worker, 0, capacity),
@@ -225,7 +234,9 @@ rePop:
 		w = t.genGo()
 	} else {
 		t.blocking++
-		t.printf(levelInfo, "pool enter wait [running: %d, blocking: %d, freeWorkerLen: %d]", t.running, t.blocking, len(t.freeWorkerQueue))
+		if t.printLog {
+			t.printf(levelInfo, "pool enter wait [running: %d, blocking: %d, freeWorkerLen: %d]", t.running, t.blocking, len(t.freeWorkerQueue))
+		}
 		// 有一个哨兵间隔 t.polTime 轮询, 根据 freeWorkerQueue 是否有空闲的 worker 进行唤醒
 		t.cond.Wait()
 		t.blocking--
@@ -347,7 +358,7 @@ func (t *TaskPool) cleanUp(isSafeClose bool) {
 	l := len(t.freeWorkerQueue)
 
 	// 避免池子没有任务也打印日志
-	if !isSafeClose && (l > 0 || t.running > 0 || t.blocking > 0) {
+	if !isSafeClose && (l > 0 || t.running > 0 || t.blocking > 0) && t.printLog {
 		t.printf(levelInfo, "sentinel clean up [freeWorker: %d, running: %d, blocking: %d]", l, t.running, t.blocking)
 	}
 	if l == 0 {
