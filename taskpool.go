@@ -262,8 +262,7 @@ func (t *TaskPool) freeWorkerQueueLPop(needLock bool) (w *worker) {
 		defer t.rwMu.Unlock()
 	}
 
-	l := len(t.freeWorkerQueue)
-	if l == 0 {
+	if len(t.freeWorkerQueue) == 0 {
 		return nil
 	}
 	w = t.freeWorkerQueue[0]
@@ -439,7 +438,6 @@ func (t *TaskPool) printf(level logLevel, format string, v ...interface{}) {
 //     2. 局部使用推荐使用 SafeClose, 防止任务未执行完就退出
 func (t *TaskPool) Close() {
 	if t.closed() {
-		t.print(levelError, "task pool is closed")
 		return
 	}
 	t.toClosed()
@@ -453,7 +451,6 @@ func (t *TaskPool) Close() {
 // SafeClose 安全的关闭, 这样可以保证未处理的任务都执行完
 func (t *TaskPool) SafeClose(timeout ...time.Duration) {
 	if t.closed() {
-		t.print(levelError, "task pool is closed")
 		return
 	}
 	var (
