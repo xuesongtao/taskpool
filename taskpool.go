@@ -12,8 +12,8 @@ import (
 
 const (
 	// 默认
-	defaultPolDuration        time.Duration = time.Second  // 哨兵默认轮询时间
-	defaultWorkerMaxLifeCycle sec           = 10 * sec(60) // worker 最大存活期(单位: 秒)
+	defaultPolDuration        time.Duration = 5 * time.Minute // 哨兵默认轮询时间
+	defaultWorkerMaxLifeCycle sec           = 10 * sec(60)    // worker 最大存活期(单位: 秒)
 
 	// 状态
 	closed int32 = 1 // 任务池是否关闭
@@ -24,10 +24,9 @@ const (
 )
 
 type (
-	sec      = int64
-	logLevel int
-	taskFunc func()
-	// taskFuncErr    func() error
+	sec            = int64
+	logLevel       int
+	taskFunc       func()
 	TaskPoolOption func(p *TaskPool)
 )
 
@@ -107,13 +106,12 @@ func (w *worker) goWorker(pool *TaskPool) {
 				f()
 
 				// 放入 freeWorkerQueue 为了后面复用
-				if isGiveUp := pool.freeWorkerQueueAppend(w, true); isGiveUp {
+				isGiveUp := pool.freeWorkerQueueAppend(w, true)
+				pool.cond.Signal() // 通知阻塞的去取
+				if isGiveUp {
 					pool.printf(levelInfo, "worker [%s] is expire, it is give up", w.workNo)
-					return
+					return // 退出当前协程
 				}
-
-				// 通知阻塞的去取
-				pool.cond.Signal()
 			case <-w.ctx.Done():
 				pool.printf(levelInfo, "pool close worker [%s] exit", w.workNo)
 				return
@@ -149,7 +147,7 @@ func NewTaskPool(poolName string, capacity int, opts ...TaskPoolOption) *TaskPoo
 		capacity = runtime.NumCPU()
 	}
 	t := &TaskPool{
-		isPre:              true,
+		isPre:              false,
 		printLog:           true,
 		capacity:           capacity,
 		poolName:           "(" + poolName + ")",
@@ -172,7 +170,7 @@ func NewTaskPool(poolName string, capacity int, opts ...TaskPoolOption) *TaskPoo
 	}
 	t.cond = sync.NewCond(&t.rwMu)
 
-	// 起一个哨兵, 目的:
+	// 开启一个哨兵, 目的:
 	// 1.用于定时唤醒阻塞队列
 	// 2.定时删除生命到期了的 worker
 	go t.poolSentinel(ctx)
@@ -201,7 +199,7 @@ func (t *TaskPool) genGo() *worker {
 // 		1. 如果任务为 func() 的话可以直接传入,
 // 		2. 如果带参的 func 需要包裹下, 如: test(1, 2, 3) => func() {test(1, 2, 3)}
 func (t *TaskPool) Submit(task taskFunc, async ...bool) {
-	if atomic.LoadInt32(&t.isClosed) == closed {
+	if t.closed() {
 		t.print(levelError, "task pool is closed")
 		return
 	}
@@ -216,6 +214,10 @@ func (t *TaskPool) Submit(task taskFunc, async ...bool) {
 		w := t.getFreeWorker()
 		w.taskCh <- task
 	}
+}
+
+func (t *TaskPool) closed() bool {
+	return atomic.LoadInt32(&t.isClosed) == closed
 }
 
 // getFreeWorker 获取 goroutine, 如果运行的数量大于等于最大数目的时候进行阻塞
@@ -237,7 +239,9 @@ rePop:
 		if t.printLog {
 			t.printf(levelInfo, "pool enter wait [running: %d, blocking: %d, freeWorkerLen: %d]", t.running, t.blocking, len(t.freeWorkerQueue))
 		}
-		// 有一个哨兵间隔 t.polTime 轮询, 根据 freeWorkerQueue 是否有空闲的 worker 进行唤醒
+		// 唤醒时机:
+		// 1. 每个 worker 执行完任务后都会唤醒
+		// 2. 有一个哨兵间隔 t.polTime 轮询, 根据 freeWorkerQueue 是否有空闲的 worker 进行唤醒
 		t.cond.Wait()
 		t.blocking--
 
@@ -300,13 +304,11 @@ func (t *TaskPool) poolSentinel(ctx context.Context) {
 		t.Close()
 	}()
 
-	// 这里根据轮询时间换算清理时间(采用尽可能多的让子协程存活原则), 这里换算公式如: 1s 轮询一次, 1min 才清理一次
-	cleanUpTime := 60 * sec(t.polTime/time.Second)
+	cleanUpTime := sec(t.polTime / time.Second)
 	for {
 		select {
 		case timeVal := <-heartbeat.C:
-			t.awaken()
-
+			// t.awaken() // worker 结束后会自动唤醒
 			if timeVal.Unix()-t.lastCleanUpTime > cleanUpTime {
 				t.cleanUp(false)
 				t.lastCleanUpTime = time.Now().Unix()
@@ -318,7 +320,7 @@ func (t *TaskPool) poolSentinel(ctx context.Context) {
 	}
 }
 
-// awaken 唤醒阻塞队列
+// Deprecated: awaken 唤醒阻塞队列
 func (t *TaskPool) awaken() {
 	// 判断 freeWorkerQueue 里是否有空闲的 worker,
 	// 1. 如果空闲的总数等于设置的容量就全部释放
@@ -342,7 +344,8 @@ func (t *TaskPool) awaken() {
 		t.cond.Signal()
 	}
 
-	// 上面根据队列空闲worker来释放有可能出现总队列数小于容量(过期的会被自动清理), 所有可以再更加剩余可运行的数量进行唤醒
+	// 上面根据队列空闲 worker 来释放有可能出现总队列数小于容量(过期的会被自动清理),
+	// 所有可以再根据剩余可运行的数量进行唤醒
 	remainCanRunning := t.capacity - int(running)
 	for j := 0; j < remainCanRunning; j++ {
 		t.cond.Signal()
@@ -351,12 +354,7 @@ func (t *TaskPool) awaken() {
 
 // cleanUp 清理生命周期到期的 worker
 func (t *TaskPool) cleanUp(isSafeClose bool) {
-	t.rwMu.Lock()
-	defer t.rwMu.Unlock()
-
-	curTimestamp := time.Now().Unix()
-	l := len(t.freeWorkerQueue)
-
+	l := t.FreeWorkerQueueLen()
 	// 避免池子没有任务也打印日志
 	if !isSafeClose && (l > 0 || t.running > 0 || t.blocking > 0) && t.printLog {
 		t.printf(levelInfo, "sentinel clean up [freeWorker: %d, running: %d, blocking: %d]", l, t.running, t.blocking)
@@ -365,9 +363,21 @@ func (t *TaskPool) cleanUp(isSafeClose bool) {
 		return
 	}
 
-	// 1. 如果是后台哨兵处理时, 每轮只清理一个就退出, 保证尽可能多的worker执行
-	// 2. 如果是调用 SafeClose() 就一次处理完
+	// 1. 如果是调用 SafeClose() 就一次处理完
+	if isSafeClose {
+		w := t.freeWorkerQueueLPop(true)
+		for w != nil {
+			w.taskCh <- nil
+			w = t.freeWorkerQueueLPop(true)
+		}
+		return
+	}
+
+	// 2. 如果是后台哨兵处理时, 每轮只清理一个就退出, 保证尽可能多的 worker 执行
+	curTimestamp := time.Now().Unix()
 	expireAtIndex := -1
+	t.rwMu.Lock()
+	defer t.rwMu.Unlock()
 	for index, w := range t.freeWorkerQueue {
 		if curTimestamp > w.startTime+t.workerMaxLifeCycle {
 			expireAtIndex = index
@@ -426,17 +436,26 @@ func (t *TaskPool) printf(level logLevel, format string, v ...interface{}) {
 //
 // 注意:
 //     1. 每次调用完一定要释放
-//     2. 局部使用外部推荐使用 SafeClose, 防止任务未执行完就退出
+//     2. 局部使用推荐使用 SafeClose, 防止任务未执行完就退出
 func (t *TaskPool) Close() {
+	if t.closed() {
+		t.print(levelError, "task pool is closed")
+		return
+	}
+	t.toClosed()
 	t.cancel()
-	// // 将空闲队列释放
-	// t.freeWorkerQueue = nil
-	// 修改标记位
-	atomic.StoreInt32(&t.isClosed, closed)
+
+	t.rwMu.Lock()
+	t.freeWorkerQueue = nil
+	t.rwMu.Unlock()
 }
 
 // SafeClose 安全的关闭, 这样可以保证未处理的任务都执行完
 func (t *TaskPool) SafeClose(timeout ...time.Duration) {
+	if t.closed() {
+		t.print(levelError, "task pool is closed")
+		return
+	}
 	var (
 		ctx    = context.Background()
 		cancel context.CancelFunc
@@ -450,26 +469,29 @@ func (t *TaskPool) SafeClose(timeout ...time.Duration) {
 	t.rwMu.Lock()
 	t.workerMaxLifeCycle = sec(1)
 	t.rwMu.Unlock()
+	defer t.toClosed()
 	for {
 		// 超时退出
 		select {
 		case <-ctx.Done():
 			t.printf(levelInfo, "task pool have %d working", t.running)
 			t.Close()
-			break
+			return
 		default:
 		}
 
-		// 1. 全部都空闲就直接关闭
-		// 2. 没有跑的 goroutine 也可以直接退出
-		if t.FreeWorkerQueueLen() == t.capacity || t.Running() == 0 {
-			t.Close()
-			break
+		// 没有跑的 goroutine 也可以直接退出
+		if t.Running() == 0 {
+			return
 		}
-
 		// 清理空闲队列
 		t.cleanUp(true)
 	}
+}
+
+// toClosed 修改标记位
+func (t *TaskPool) toClosed() {
+	atomic.StoreInt32(&t.isClosed, closed)
 }
 
 // Running 获取运行 worker 数量

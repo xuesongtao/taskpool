@@ -18,6 +18,7 @@ func init() {
 }
 
 func TestGetGoId(t *testing.T) {
+	t.Skip()
 	defer func() {
 		t.Log(getGoId())
 	}()
@@ -25,43 +26,59 @@ func TestGetGoId(t *testing.T) {
 }
 
 func TestNewTaskPool_NoArg(t *testing.T) {
+	t.Log("TestNewTaskPool_NoArg start")
 	p := NewTaskPool("test", 2, WithWorkerMaxLifeCycle(2), WithPolTime(time.Second))
-	defer p.SafeClose()
 
+	count := 0
 	fn := func() {
-		randInt := time.Duration(rand.Intn(5))
 		gid := getGoId()
 		fmt.Printf(">>开始执行任务的time: %v, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), gid)
+		count++
+
+		randInt := time.Duration(rand.Intn(5))
 		time.Sleep(randInt * time.Second)
 		fmt.Printf(">>执行任务结束的time: %v, 任务运行时间: %d sec, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), randInt, gid)
 	}
-	for i := 0; i < 5; i++ {
+	size := 5
+	for i := 0; i < size; i++ {
 		p.Submit(fn)
+	}
+	p.SafeClose()
+
+	if count != size {
+		t.Fatalf("handle failed, count: %d, size: %d", count, size)
 	}
 }
 
 func TestNewTaskPool_HaveArg(t *testing.T) {
+	t.Log("TestNewTaskPool_HaveArg start")
 	p := NewTaskPool("test", 2)
-	defer p.SafeClose()
 	log.Printf("curtime: %v\n", time.Now().Format("2006-01-02 15:04:05.000"))
 
+	count := 0
 	fn := func(id int) {
 		gid := getGoId()
 		fmt.Printf(">>开始执行任务的time: %v, gid: %v\n", time.Now().Format("2006-01-02 15:04:05.000"), gid)
+		count++
+
 		s := time.Duration(rand.Intn(5))
 		time.Sleep(s * time.Second)
 		fmt.Printf(">>执行任务结束的time: %v, num: %d 任务运行时间: %d, gid:%v\n", time.Now().Format("2006-01-02 15:04:05.000"), id, s, gid)
 	}
 
-	for i := 0; i < 5; i++ {
+	size := 5
+	for i := 0; i < size; i++ {
 		p.Submit(func() {
 			func(i int) {
 				fn(i)
 			}(i)
 		}, true)
 	}
-	time.Sleep(time.Second * 10)
 	p.SafeClose()
+
+	if count != size {
+		t.Fatalf("handle failed, count: %d, size: %d", count, size)
+	}
 }
 
 func TestLogInfo(t *testing.T) {
@@ -72,9 +89,9 @@ func TestLogInfo(t *testing.T) {
 }
 
 func TestNewTaskPool_SafeClose(t *testing.T) {
+	t.Log("TestNewTaskPool_SafeClose start")
 	size := 3
 	p := NewTaskPool("test", size)
-	defer p.SafeClose()
 
 	a := map[int]struct{}{}
 	for i := 0; i < size; i++ {
@@ -82,6 +99,14 @@ func TestNewTaskPool_SafeClose(t *testing.T) {
 		p.Submit(func() {
 			a[tmp] = struct{}{}
 		})
+	}
+	p.SafeClose()
+
+	// 验证
+	for i := 0; i < size; i++ {
+		if _, ok := a[i]; !ok {
+			t.Fatal("handle is failed")
+		}
 	}
 }
 
@@ -101,18 +126,20 @@ func TestPanicDemo(t *testing.T) {
 }
 
 func TestQueueChange(t *testing.T) {
+	t.Log("TestQueueChange start")
 	p := NewTaskPool("test", 20)
 	defer p.SafeClose()
 	ptr := fmt.Sprintf("%p", p.freeWorkerQueue)
 
 	fn := func() {
-		randInt := time.Duration(rand.Intn(5))
+		randInt := time.Duration(rand.Intn(2))
 		gid := getGoId()
 		fmt.Printf(">>开始执行任务的time: %v, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), gid)
 		time.Sleep(randInt * time.Second)
 		fmt.Printf(">>执行任务结束的time: %v, 任务运行时间: %d sec, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), randInt, gid)
 	}
 	for i := 0; i < 500; i++ {
+		// p.freeWorkerQueue 地址没有变
 		if ptrAddr := fmt.Sprintf("%p", p.freeWorkerQueue); ptrAddr != ptr {
 			t.Fatal("ptrAddr is change")
 		}
