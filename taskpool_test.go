@@ -39,15 +39,14 @@ func TestGetGoId(t *testing.T) {
 
 func TestNewTaskPool_NoArg(t *testing.T) {
 	t.Log("TestNewTaskPool_NoArg start")
-	p := NewTaskPool("test", 1, WithWorkerMaxLifeCycle(2), WithPolTime(time.Second))
-
+	p := NewTaskPool("test", 1, WithWorkerMaxLifeCycle(2), WithPolTime(time.Minute))
 	count := 0
 	fn := func() {
 		gid := getGoId()
 		fmt.Printf(">>开始执行任务的time: %v, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), gid)
 		count++
 
-		randInt := time.Duration(rand.Intn(3))
+		randInt := time.Duration(rand.Intn(5))
 		time.Sleep(randInt * time.Second)
 		fmt.Printf(">>执行任务结束的time: %v, 任务运行时间: %d sec, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), randInt, gid)
 	}
