@@ -88,12 +88,10 @@ func (w *worker) goWorker(pool *TaskPool) {
 			if err := recover(); err != nil {
 				pool.printStackInfo(fmt.Sprintf("worker [%s]", w.workNo), err)
 			}
-			// 放会池中
 			pool.workerCache.Put(w)
 			atomic.AddInt32(&pool.running, -1)
 		}()
 
-		// 保存 goroutine 编号
 		w.workNo = getGoId()
 		pool.printf(levelInfo, "gen worker [%s] is ok", w.workNo)
 		for {
@@ -110,7 +108,7 @@ func (w *worker) goWorker(pool *TaskPool) {
 				pool.cond.Signal() // 通知阻塞的去取
 				if isGiveUp {
 					pool.printf(levelInfo, "worker [%s] is expire, it is give up", w.workNo)
-					return // 退出当前协程
+					return
 				}
 			case <-w.ctx.Done():
 				pool.printf(levelInfo, "pool close worker [%s] exit", w.workNo)
@@ -157,14 +155,12 @@ func NewTaskPool(poolName string, capacity int, opts ...TaskPoolOption) *TaskPoo
 		workerMaxLifeCycle: defaultWorkerMaxLifeCycle,
 		cancel:             cancel,
 	}
-	// 设置配置项
 	for _, opt := range opts {
 		opt(t)
 	}
 	t.workerCache.New = func() interface{} {
 		return newWorker(ctx)
 	}
-	// 判断下是否与预分配
 	if t.isPre {
 		t.preGoWorker()
 	}
@@ -204,7 +200,6 @@ func (t *TaskPool) Submit(task taskFunc, async ...bool) {
 		return
 	}
 
-	// 异步提交
 	if len(async) > 0 && async[0] {
 		go func() {
 			w := t.getFreeWorker()
@@ -262,8 +257,7 @@ func (t *TaskPool) freeWorkerQueueLPop(needLock bool) (w *worker) {
 		defer t.rwMu.Unlock()
 	}
 
-	l := len(t.freeWorkerQueue)
-	if l == 0 {
+	if len(t.freeWorkerQueue) == 0 {
 		return nil
 	}
 	w = t.freeWorkerQueue[0]
@@ -279,8 +273,12 @@ func (t *TaskPool) freeWorkerQueueAppend(w *worker, needLock bool) (isGiveUp boo
 		defer t.rwMu.Unlock()
 	}
 
-	curTime := time.Now().Unix()
+	if t.running >= int32(t.capacity) {
+		return true
+	}
+
 	// 如果存活时间到了就直接丢掉
+	curTime := time.Now().Unix()
 	if curTime-w.startTime > t.workerMaxLifeCycle {
 		return true
 	}
@@ -439,12 +437,11 @@ func (t *TaskPool) printf(level logLevel, format string, v ...interface{}) {
 //     2. 局部使用推荐使用 SafeClose, 防止任务未执行完就退出
 func (t *TaskPool) Close() {
 	if t.closed() {
-		t.print(levelError, "task pool is closed")
 		return
 	}
-	t.toClosed()
-	t.cancel()
+	atomic.StoreInt32(&t.isClosed, closed)
 
+	t.cancel()
 	t.rwMu.Lock()
 	t.freeWorkerQueue = nil
 	t.rwMu.Unlock()
@@ -453,7 +450,6 @@ func (t *TaskPool) Close() {
 // SafeClose 安全的关闭, 这样可以保证未处理的任务都执行完
 func (t *TaskPool) SafeClose(timeout ...time.Duration) {
 	if t.closed() {
-		t.print(levelError, "task pool is closed")
 		return
 	}
 	var (
@@ -465,33 +461,25 @@ func (t *TaskPool) SafeClose(timeout ...time.Duration) {
 		defer cancel()
 	}
 
-	// 将过期时间设置为 1 秒, 执行完了就再回收时(freeWorkerQueueAppend)就直接舍弃掉
+	// 将过期时间设置为 1 秒, 执行完了再回收时(freeWorkerQueueAppend)就直接舍弃掉
 	t.rwMu.Lock()
 	t.workerMaxLifeCycle = sec(1)
 	t.rwMu.Unlock()
-	defer t.toClosed()
+	defer t.Close()
 	for {
-		// 超时退出
 		select {
 		case <-ctx.Done():
 			t.printf(levelInfo, "task pool have %d working", t.running)
-			t.Close()
 			return
 		default:
 		}
 
 		// 没有跑的 goroutine 也可以直接退出
-		if t.Running() == 0 {
+		if t.Running() == 0 && t.Blocking() == 0 {
 			return
 		}
-		// 清理空闲队列
 		t.cleanUp(true)
 	}
-}
-
-// toClosed 修改标记位
-func (t *TaskPool) toClosed() {
-	atomic.StoreInt32(&t.isClosed, closed)
 }
 
 // Running 获取运行 worker 数量
