@@ -124,7 +124,7 @@ type TaskPool struct {
 	printLog           bool          // 是否打印 log
 	running            int32         // 正在运行的数量
 	blocking           int32         // 阻塞的个数
-	isClosed           int32         // cancel() 后设置为 ture
+	isClosed           int32         // 标记是否关闭
 	capacity           int           // 最大工作数
 	poolName           string        // 任务池的名称, 用日志记录前缀
 	log                Logger        // log
@@ -194,6 +194,7 @@ func (t *TaskPool) genGo() *worker {
 // 使用:
 // 		1. 如果任务为 func() 的话可以直接传入,
 // 		2. 如果带参的 func 需要包裹下, 如: test(1, 2, 3) => func() {test(1, 2, 3)}
+// 注: 调用 SafeClose(局部调用)的场景, 使用异步提交的时候会失败
 func (t *TaskPool) Submit(task taskFunc, async ...bool) {
 	if t.closed() {
 		t.print(levelError, "task pool is closed")
@@ -209,10 +210,6 @@ func (t *TaskPool) Submit(task taskFunc, async ...bool) {
 		w := t.getFreeWorker()
 		w.taskCh <- task
 	}
-}
-
-func (t *TaskPool) closed() bool {
-	return atomic.LoadInt32(&t.isClosed) == closed
 }
 
 // getFreeWorker 获取 goroutine, 如果运行的数量大于等于最大数目的时候进行阻塞
@@ -357,6 +354,9 @@ func (t *TaskPool) cleanUp(isSafeClose bool) {
 	if !isSafeClose && (l > 0 || t.running > 0 || t.blocking > 0) && t.printLog {
 		t.printf(levelInfo, "sentinel clean up [freeWorker: %d, running: %d, blocking: %d]", l, t.running, t.blocking)
 	}
+	if t.Blocking() > 0 {
+		t.cond.Signal()
+	}
 	if l == 0 {
 		return
 	}
@@ -430,6 +430,10 @@ func (t *TaskPool) printf(level logLevel, format string, v ...interface{}) {
 	t.log.Infof("%s "+format, args...)
 }
 
+func (t *TaskPool) closed() bool {
+	return atomic.LoadInt32(&t.isClosed) == closed
+}
+
 // Close 关闭协程池,
 //
 // 注意:
@@ -448,6 +452,7 @@ func (t *TaskPool) Close() {
 }
 
 // SafeClose 安全的关闭, 这样可以保证未处理的任务都执行完
+// 注: 只能阻塞同步提交的任务
 func (t *TaskPool) SafeClose(timeout ...time.Duration) {
 	if t.closed() {
 		return
