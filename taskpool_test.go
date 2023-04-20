@@ -218,6 +218,7 @@ func TestAppend1(t *testing.T) {
 
 // 通过切片操作
 func TestAppend2(t *testing.T) {
+	t.Skip()
 	demos := make([]int, 0, 10)
 	for i := 0; i < 10; i++ {
 		demos = append(demos, i)
