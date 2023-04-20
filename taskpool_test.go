@@ -17,6 +17,18 @@ func init() {
 	// go server.ListenAndServe()
 }
 
+func TestTmp(t *testing.T) {
+	a := []int{1}
+	t.Log(a, len(a), cap(a))
+	ptr := fmt.Sprintf("%p", a)
+	a = append(a[:0], a[1:]...)
+	ptr1 := fmt.Sprintf("%p", a)
+	if ptr1 != ptr {
+		t.Error("failed")
+	}
+	t.Log(a)
+}
+
 func TestGetGoId(t *testing.T) {
 	t.Skip()
 	defer func() {
@@ -27,7 +39,7 @@ func TestGetGoId(t *testing.T) {
 
 func TestNewTaskPool_NoArg(t *testing.T) {
 	t.Log("TestNewTaskPool_NoArg start")
-	p := NewTaskPool("test", 2, WithWorkerMaxLifeCycle(2), WithPolTime(time.Second))
+	p := NewTaskPool("test", 1, WithWorkerMaxLifeCycle(2), WithPolTime(time.Second))
 
 	count := 0
 	fn := func() {
@@ -35,11 +47,11 @@ func TestNewTaskPool_NoArg(t *testing.T) {
 		fmt.Printf(">>开始执行任务的time: %v, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), gid)
 		count++
 
-		randInt := time.Duration(rand.Intn(5))
+		randInt := time.Duration(rand.Intn(3))
 		time.Sleep(randInt * time.Second)
 		fmt.Printf(">>执行任务结束的time: %v, 任务运行时间: %d sec, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), randInt, gid)
 	}
-	size := 5
+	size := 3
 	for i := 0; i < size; i++ {
 		p.Submit(fn)
 	}
@@ -52,7 +64,8 @@ func TestNewTaskPool_NoArg(t *testing.T) {
 
 func TestNewTaskPool_HaveArg(t *testing.T) {
 	t.Log("TestNewTaskPool_HaveArg start")
-	p := NewTaskPool("test", 2)
+	p := NewTaskPool("test", 1)
+	defer p.Close()
 	log.Printf("curtime: %v\n", time.Now().Format("2006-01-02 15:04:05.000"))
 
 	count := 0
@@ -61,7 +74,7 @@ func TestNewTaskPool_HaveArg(t *testing.T) {
 		fmt.Printf(">>开始执行任务的time: %v, gid: %v\n", time.Now().Format("2006-01-02 15:04:05.000"), gid)
 		count++
 
-		s := time.Duration(rand.Intn(5))
+		s := time.Duration(rand.Intn(3))
 		time.Sleep(s * time.Second)
 		fmt.Printf(">>执行任务结束的time: %v, num: %d 任务运行时间: %d, gid:%v\n", time.Now().Format("2006-01-02 15:04:05.000"), id, s, gid)
 	}
@@ -74,7 +87,7 @@ func TestNewTaskPool_HaveArg(t *testing.T) {
 			}(i)
 		}, true)
 	}
-	p.SafeClose()
+	time.Sleep(time.Second * 10)
 
 	if count != size {
 		t.Fatalf("handle failed, count: %d, size: %d", count, size)
