@@ -88,8 +88,10 @@ func (w *worker) goWorker(pool *TaskPool) {
 			if err := recover(); err != nil {
 				pool.printStackInfo(fmt.Sprintf("worker [%s]", w.workNo), err)
 			}
-			pool.workerCache.Put(w)
 			atomic.AddInt32(&pool.running, -1)
+			pool.workerCache.Put(w)
+			// fmt.Printf("run: %d, block: %d", pool.Running(), pool.Blocking())
+			pool.cond.Signal() // 如果已经有阻塞的协程, 此时应该再释放下(防止 running-1 发生在 getFreeWorker 之后, 就会出现一个协程一直阻塞)
 		}()
 
 		w.workNo = getGoId()
@@ -104,12 +106,11 @@ func (w *worker) goWorker(pool *TaskPool) {
 				f()
 
 				// 放入 freeWorkerQueue 为了后面复用
-				isGiveUp := pool.freeWorkerQueueAppend(w, true)
-				pool.cond.Signal() // 通知阻塞的去取
-				if isGiveUp {
+				if isGiveUp := pool.freeWorkerQueueAppend(w, true); isGiveUp {
 					pool.printf(levelInfo, "worker [%s] is expire, it is give up", w.workNo)
 					return
 				}
+				pool.cond.Signal() // 通知阻塞的去取
 			case <-w.ctx.Done():
 				pool.printf(levelInfo, "pool close worker [%s] exit", w.workNo)
 				return
@@ -170,7 +171,7 @@ func NewTaskPool(poolName string, capacity int, opts ...TaskPoolOption) *TaskPoo
 	// 1.用于定时唤醒阻塞队列
 	// 2.定时删除生命到期了的 worker
 	go t.poolSentinel(ctx)
-	t.printf(levelInfo, "create taskPool is success, clean worker time for %d sec, capacity: %d", t.workerMaxLifeCycle, t.capacity)
+	t.printf(levelInfo, "create taskPool is success, worker life time for %d sec, capacity: %d", t.workerMaxLifeCycle, t.capacity)
 	return t
 }
 
@@ -270,10 +271,6 @@ func (t *TaskPool) freeWorkerQueueAppend(w *worker, needLock bool) (isGiveUp boo
 		defer t.rwMu.Unlock()
 	}
 
-	if t.running >= int32(t.capacity) {
-		return true
-	}
-
 	// 如果存活时间到了就直接丢掉
 	curTime := time.Now().Unix()
 	if curTime-w.startTime > t.workerMaxLifeCycle {
@@ -350,11 +347,13 @@ func (t *TaskPool) awaken() {
 // cleanUp 清理生命周期到期的 worker
 func (t *TaskPool) cleanUp(isSafeClose bool) {
 	l := t.FreeWorkerQueueLen()
+	running := t.Running()
+	blocking := t.Blocking()
 	// 避免池子没有任务也打印日志
-	if !isSafeClose && (l > 0 || t.running > 0 || t.blocking > 0) && t.printLog {
-		t.printf(levelInfo, "sentinel clean up [freeWorker: %d, running: %d, blocking: %d]", l, t.running, t.blocking)
+	if !isSafeClose && (l > 0 || running > 0 || blocking > 0) && t.printLog {
+		t.printf(levelInfo, "sentinel clean up [freeWorker: %d, running: %d, blocking: %d]", l, running, blocking)
 	}
-	if t.Blocking() > 0 {
+	if blocking > 0 {
 		t.cond.Signal()
 	}
 	if l == 0 {
