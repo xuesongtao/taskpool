@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -194,8 +195,9 @@ func (t *TaskPool) genGo() *worker {
 
 // Submit 对外通过此方法向协程池添加任务
 // 使用:
-// 		1. 如果任务为 func() 的话可以直接传入,
-// 		2. 如果带参的 func 需要包裹下, 如: test(1, 2, 3) => func() {test(1, 2, 3)}
+//  1. 如果任务为 func() 的话可以直接传入,
+//  2. 如果带参的 func 需要包裹下, 如: test(1, 2, 3) => func() {test(1, 2, 3)}
+//
 // 注: 调用 SafeClose(局部调用)的场景, 使用异步提交的时候会失败
 func (t *TaskPool) Submit(task taskFunc, async ...bool) {
 	if t.closed() {
@@ -437,8 +439,8 @@ func (t *TaskPool) closed() bool {
 // Close 关闭协程池,
 //
 // 注意:
-//     1. 每次调用完一定要释放
-//     2. 局部使用推荐使用 SafeClose, 防止任务未执行完就退出
+//  1. 每次调用完一定要释放
+//  2. 局部使用推荐使用 SafeClose, 防止任务未执行完就退出
 func (t *TaskPool) Close() {
 	if t.closed() {
 		return
@@ -454,6 +456,12 @@ func (t *TaskPool) Close() {
 // SafeClose 安全的关闭, 这样可以保证未处理的任务都执行完
 // 注: 只能阻塞同步提交的任务
 func (t *TaskPool) SafeClose(timeout ...time.Duration) {
+	defer t.Close()
+	t.Wait(timeout...)
+}
+
+// Wait 等待执行完
+func (t *TaskPool) Wait(timeout ...time.Duration) {
 	if t.closed() {
 		return
 	}
@@ -470,7 +478,6 @@ func (t *TaskPool) SafeClose(timeout ...time.Duration) {
 	t.rwMu.Lock()
 	t.workerMaxLifeCycle = sec(1)
 	t.rwMu.Unlock()
-	defer t.Close()
 	for {
 		select {
 		case <-ctx.Done():
@@ -506,20 +513,8 @@ func (t *TaskPool) FreeWorkerQueueLen() int {
 
 // getGoId 获取 goroutine id
 func getGoId() (gid string) {
-	var (
-		buf     [50]byte
-		idBytes [25]byte
-	)
-	size := runtime.Stack(buf[:], false)
-	// fmt.Println("test:", string(buf[:]))
-	// 如: goroutine 8 [running]
-	j := 0
-	for i := 0; i < size; i++ {
-		v := buf[i]
-		if v >= '0' && v <= '9' {
-			idBytes[j] = v
-			j++
-		}
-	}
-	return string(idBytes[:])
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	idField := strings.Fields(strings.TrimPrefix(string(buf[:n]), "goroutine "))[0]
+	return idField
 }
