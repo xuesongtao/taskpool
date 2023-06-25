@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -512,20 +513,8 @@ func (t *TaskPool) FreeWorkerQueueLen() int {
 
 // getGoId 获取 goroutine id
 func getGoId() (gid string) {
-	var (
-		buf     [50]byte
-		idBytes [25]byte
-	)
-	size := runtime.Stack(buf[:], false)
-	// fmt.Println("test:", string(buf[:]))
-	// 如: goroutine 8 [running]
-	j := 0
-	for i := 0; i < size; i++ {
-		v := buf[i]
-		if v >= '0' && v <= '9' {
-			idBytes[j] = v
-			j++
-		}
-	}
-	return string(idBytes[:])
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	idField := strings.Fields(strings.TrimPrefix(string(buf[:n]), "goroutine "))[0]
+	return idField
 }
