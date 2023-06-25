@@ -456,12 +456,6 @@ func (t *TaskPool) Close() {
 // SafeClose 安全的关闭, 这样可以保证未处理的任务都执行完
 // 注: 只能阻塞同步提交的任务
 func (t *TaskPool) SafeClose(timeout ...time.Duration) {
-	defer t.Close()
-	t.Wait(timeout...)
-}
-
-// Wait 等待执行完
-func (t *TaskPool) Wait(timeout ...time.Duration) {
 	if t.closed() {
 		return
 	}
@@ -478,6 +472,7 @@ func (t *TaskPool) Wait(timeout ...time.Duration) {
 	t.rwMu.Lock()
 	t.workerMaxLifeCycle = sec(1)
 	t.rwMu.Unlock()
+	defer t.Close()
 	for {
 		select {
 		case <-ctx.Done():
