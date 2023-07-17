@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -40,23 +41,23 @@ func TestGetGoId(t *testing.T) {
 func TestNewTaskPool_NoArg(t *testing.T) {
 	t.Log("TestNewTaskPool_NoArg start")
 	p := NewTaskPool("test", 1, WithWorkerMaxLifeCycle(2), WithPolTime(time.Minute))
-	count := 0
+	count := int32(0)
 	fn := func() {
 		gid := getGoId()
 		fmt.Printf(">>开始执行任务的time: %v, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), gid)
-		count++
+		atomic.AddInt32(&count, 1)
 
 		randInt := time.Duration(rand.Intn(5))
 		time.Sleep(randInt * time.Second)
 		fmt.Printf(">>执行任务结束的time: %v, 任务运行时间: %d sec, gid: %s\n", time.Now().Format("2006-01-02 15:04:05.000"), randInt, gid)
 	}
-	size := 3
-	for i := 0; i < size; i++ {
+	size := int32(3)
+	for i := 0; i < int(size); i++ {
 		p.Submit(fn)
 	}
 	p.SafeClose()
 
-	if count != size {
+	if atomic.LoadInt32(&count) != size {
 		t.Fatalf("handle failed, count: %d, size: %d", count, size)
 	}
 }
@@ -67,28 +68,27 @@ func TestNewTaskPool_HaveArg(t *testing.T) {
 	defer p.Close()
 	log.Printf("curtime: %v\n", time.Now().Format("2006-01-02 15:04:05.000"))
 
-	count := 0
+	count := int32(0)
 	fn := func(id int) {
 		gid := getGoId()
 		fmt.Printf(">>开始执行任务的time: %v, gid: %v\n", time.Now().Format("2006-01-02 15:04:05.000"), gid)
-		count++
+		atomic.AddInt32(&count, 1)
 
 		s := time.Duration(rand.Intn(3))
 		time.Sleep(s * time.Second)
 		fmt.Printf(">>执行任务结束的time: %v, num: %d 任务运行时间: %d, gid:%v\n", time.Now().Format("2006-01-02 15:04:05.000"), id, s, gid)
 	}
 
-	size := 5
-	for i := 0; i < size; i++ {
+	size := int32(5)
+	for i := 0; i < int(size); i++ {
+		tmp := i
 		p.Submit(func() {
-			func(i int) {
-				fn(i)
-			}(i)
-		}, true)
+			fn(tmp)
+		})
 	}
 	time.Sleep(time.Second * 10)
 
-	if count != size {
+	if atomic.LoadInt32(&count) != size {
 		t.Fatalf("handle failed, count: %d, size: %d", count, size)
 	}
 }
