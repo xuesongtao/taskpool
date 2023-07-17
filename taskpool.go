@@ -89,7 +89,7 @@ func (w *worker) goWorker(pool *TaskPool) {
 			if err := recover(); err != nil {
 				pool.printStackInfo(fmt.Sprintf("worker [%s]", w.workNo), err)
 			}
-			atomic.AddInt32(&pool.running, -1)
+			pool.deCrRunning()
 			pool.workerCache.Put(w)
 			// fmt.Printf("run: %d, block: %d", pool.Running(), pool.Blocking())
 			// 防止 running-1 发生在 getFreeWorker 之后, 就会出现一个协程一直阻塞, 需要再释放下
@@ -303,7 +303,6 @@ func (t *TaskPool) poolSentinel(ctx context.Context) {
 	for {
 		select {
 		case timeVal := <-heartbeat.C:
-			// t.awaken() // worker 结束后会自动唤醒
 			if timeVal.Unix()-t.lastCleanUpTime > cleanUpTime {
 				t.cleanUp(false)
 				t.lastCleanUpTime = time.Now().Unix()
@@ -312,38 +311,6 @@ func (t *TaskPool) poolSentinel(ctx context.Context) {
 			t.print(levelInfo, "pool is closed")
 			return
 		}
-	}
-}
-
-// Deprecated: awaken 唤醒阻塞队列
-func (t *TaskPool) awaken() {
-	// 判断 freeWorkerQueue 里是否有空闲的 worker,
-	// 1. 如果空闲的总数等于设置的容量就全部释放
-	// 2. 有多少空闲数就释放几个
-	t.rwMu.RLock()
-	freeWorkerLen := len(t.freeWorkerQueue)
-	running := t.running
-	t.rwMu.RUnlock()
-
-	// 以下存在 data race, 可以不用管
-	// 全部释放阻塞队列这里有两种情况:
-	// 1. 空闲队列满就直接释放所有阻塞 task
-	// 2. 队列里地协程都过期了, 还有任务被阻塞需要释放防止 task 一直不被执行.
-	if freeWorkerLen == t.capacity || running == 0 {
-		t.cond.Broadcast()
-		return
-	}
-
-	// 有多少空闲的释放多少
-	for i := 0; i < freeWorkerLen; i++ {
-		t.cond.Signal()
-	}
-
-	// 上面根据队列空闲 worker 来释放有可能出现总队列数小于容量(过期的会被自动清理),
-	// 所有可以再根据剩余可运行的数量进行唤醒
-	remainCanRunning := t.capacity - int(running)
-	for j := 0; j < remainCanRunning; j++ {
-		t.cond.Signal()
 	}
 }
 
@@ -489,14 +456,24 @@ func (t *TaskPool) SafeClose(timeout ...time.Duration) {
 	}
 }
 
+func (t *TaskPool) deCrRunning() {
+	t.rwMu.Lock()
+	defer t.rwMu.Unlock()
+	t.running--
+}
+
 // Running 获取运行 worker 数量
 func (t *TaskPool) Running() int32 {
-	return atomic.LoadInt32(&t.running)
+	t.rwMu.RLock()
+	defer t.rwMu.RUnlock()
+	return t.running
 }
 
 // Blocking 获取阻塞的 worker 数量
 func (t *TaskPool) Blocking() int32 {
-	return atomic.LoadInt32(&t.blocking)
+	t.rwMu.RLock()
+	defer t.rwMu.RUnlock()
+	return t.blocking
 }
 
 // FreeWorkerQueueLen 空闲队列池里的长度

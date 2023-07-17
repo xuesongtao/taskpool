@@ -14,3 +14,4 @@
 version.txt
 
 tmp/
+*.log
