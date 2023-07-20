@@ -321,7 +321,7 @@ func (t *TaskPool) cleanUp(isSafeClose bool) {
 	blocking := t.Blocking()
 	// 避免池子没有任务也打印日志
 	if !isSafeClose && (l > 0 || running > 0 || blocking > 0) && t.printLog {
-		t.printf(levelInfo, "sentinel clean up [freeWorker: %d, running: %d, blocking: %d]", l, running, blocking)
+		t.printf(levelInfo, "sentinel clean up [running: %d, blocking: %d, freeWorkerLen: %d]", running, blocking, l)
 	}
 	if blocking > 0 {
 		t.cond.Signal()
