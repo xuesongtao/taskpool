@@ -105,8 +105,8 @@ func TestNewTaskPool_SafeClose(t *testing.T) {
 	size := 3
 	p := NewTaskPool("test", size)
 
-	a := map[int]struct{}{}
-	for i := 0; i < size; i++ {
+	a := make(map[int]struct{}, size)
+	for i := 0; i < 10; i++ {
 		tmp := i
 		p.Submit(func() {
 			a[tmp] = struct{}{}
