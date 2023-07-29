@@ -66,6 +66,13 @@ func WithProGoWorker() TaskPoolOption {
 	}
 }
 
+// WithCtx 外部设置 content.Context
+func WithCtx(ctx context.Context) TaskPoolOption {
+	return func(p *TaskPool) {
+		p.ctx = ctx
+	}
+}
+
 // worker 工作者
 type worker struct {
 	ctx       context.Context // 用于传递关闭信号
@@ -123,19 +130,20 @@ func (w *worker) goWorker(pool *TaskPool) {
 
 // TaskPool 任务池
 type TaskPool struct {
-	isPre              bool          // 是否预先分配协程
-	printLog           bool          // 是否打印 log
-	running            int32         // 正在运行的数量
-	blocking           int32         // 阻塞的个数
-	isClosed           int32         // 标记是否关闭
-	capacity           int           // 最大工作数
-	poolName           string        // 任务池的名称, 用日志记录前缀
-	log                Logger        // log
-	polTime            time.Duration // 哨兵默认轮询时间
-	lastCleanUpTime    int64         // 上一次哨兵清理 worker 的时间
-	workerMaxLifeCycle sec           // worker 最大存活周期(单位: 秒)
-	freeWorkerQueue    []*worker     // 存放 worker, 保证能复用
-	cancel             context.CancelFunc
+	ctx                context.Context
+	cancel             context.CancelFunc // 外部没有传入 content.Context, 内部会初始化此值
+	isPre              bool               // 是否预先分配协程
+	printLog           bool               // 是否打印 log
+	running            int32              // 正在运行的数量
+	blocking           int32              // 阻塞的个数
+	isClosed           int32              // 标记是否关闭
+	capacity           int                // 最大工作数
+	poolName           string             // 任务池的名称, 用日志记录前缀
+	log                Logger             // log
+	polTime            time.Duration      // 哨兵默认轮询时间
+	lastCleanUpTime    int64              // 上一次哨兵清理 worker 的时间
+	workerMaxLifeCycle sec                // worker 最大存活周期(单位: 秒)
+	freeWorkerQueue    []*worker          // 存放 worker, 保证能复用
 	workerCache        sync.Pool
 	rwMu               sync.RWMutex
 	cond               *sync.Cond
@@ -143,7 +151,6 @@ type TaskPool struct {
 
 // NewTaskPool 通过此方法内部创建 ctx, 需要通过 Close() 来关闭协程池, 防止协程泄露
 func NewTaskPool(poolName string, capacity int, opts ...TaskPoolOption) *TaskPool {
-	ctx, cancel := context.WithCancel(context.Background())
 	if capacity <= 0 || capacity >= 9999 {
 		capacity = runtime.NumCPU()
 	}
@@ -156,13 +163,18 @@ func NewTaskPool(poolName string, capacity int, opts ...TaskPoolOption) *TaskPoo
 		log:                newCjLogger(),
 		polTime:            defaultPolDuration,
 		workerMaxLifeCycle: defaultWorkerMaxLifeCycle,
-		cancel:             cancel,
+		// cancel:             cancel,
 	}
+
 	for _, opt := range opts {
 		opt(t)
 	}
+
+	if t.ctx == nil {
+		t.ctx, t.cancel = context.WithCancel(context.Background())
+	}
 	t.workerCache.New = func() interface{} {
-		return newWorker(ctx)
+		return newWorker(t.ctx)
 	}
 	if t.isPre {
 		t.preGoWorker()
@@ -172,7 +184,7 @@ func NewTaskPool(poolName string, capacity int, opts ...TaskPoolOption) *TaskPoo
 	// 开启一个哨兵, 目的:
 	// 1.用于定时唤醒阻塞队列
 	// 2.定时删除生命到期了的 worker
-	go t.poolSentinel(ctx)
+	go t.poolSentinel()
 	t.printf(levelInfo, "create taskPool is success, worker life time for %d sec, capacity: %d", t.workerMaxLifeCycle, t.capacity)
 	return t
 }
@@ -208,10 +220,16 @@ func (t *TaskPool) Submit(task taskFunc, async ...bool) {
 	if len(async) > 0 && async[0] {
 		go func() {
 			w := t.getFreeWorker()
+			if t.closed() {
+				return
+			}
 			w.taskCh <- task
 		}()
 	} else {
 		w := t.getFreeWorker()
+		if t.closed() { // 防止已经获取到 w, 但 pool 已经关了, 这里再验证下
+			return
+		}
 		w.taskCh <- task
 	}
 }
@@ -287,7 +305,7 @@ func (t *TaskPool) freeWorkerQueueAppend(w *worker, needLock bool) (isGiveUp boo
 // poolSentinel 哨兵
 // 1. 定时唤醒加入阻塞队列的 worker
 // 2. 空闲的时候清除 freeWorkerQueue 里的 worker
-func (t *TaskPool) poolSentinel(ctx context.Context) {
+func (t *TaskPool) poolSentinel() {
 	heartbeat := time.NewTicker(t.polTime)
 	defer func() {
 		if err := recover(); err != nil {
@@ -307,7 +325,7 @@ func (t *TaskPool) poolSentinel(ctx context.Context) {
 				t.cleanUp(false)
 				t.lastCleanUpTime = time.Now().Unix()
 			}
-		case <-ctx.Done():
+		case <-t.ctx.Done():
 			t.print(levelInfo, "pool is closed")
 			return
 		}
@@ -414,7 +432,10 @@ func (t *TaskPool) Close() {
 	}
 	atomic.StoreInt32(&t.isClosed, closed)
 
-	t.cancel()
+	if t.cancel != nil {
+		t.cancel()
+	}
+	// t.cond.Broadcast()
 	t.rwMu.Lock()
 	t.freeWorkerQueue = nil
 	t.rwMu.Unlock()

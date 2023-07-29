@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -196,6 +197,21 @@ func CorrectMapDemo() {
 	// key: 4, value: 4
 }
 
+func TimeOutDemo() {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	taskPool := taskpool.NewTaskPool("", 4, taskpool.WithCtx(ctx))
+	for k, v := range []string{"1", "2", "3", "4", "5"} {
+		k1, v1 := k, v
+		taskPool.Submit(func() {
+			time.Sleep(5*time.Second)
+			fmt.Printf("key: %d, value: %v\n", k1, v1)
+		})
+	}
+	taskPool.SafeClose()
+}
+
 func main() {
 	// ErrPageDemo()
 	// CorrectPageDemo()
@@ -204,5 +220,6 @@ func main() {
 	// CorrectSliceDemo()
 
 	// ErrMapDemo()
-	CorrectMapDemo()
+	// CorrectMapDemo()
+	TimeOutDemo()
 }
