@@ -250,9 +250,7 @@ rePop:
 		w = t.genGo()
 	} else {
 		t.blocking++
-		if t.printLog {
-			t.printf(levelInfo, "pool enter wait [running: %d, blocking: %d, freeWorkerLen: %d]", t.running, t.blocking, len(t.freeWorkerQueue))
-		}
+		t.printf(levelInfo, "pool enter wait [running: %d, blocking: %d, freeWorkerLen: %d]", t.running, t.blocking, len(t.freeWorkerQueue))
 		// 唤醒时机:
 		// 1. 每个 worker 执行完任务后都会唤醒
 		// 2. 有一个哨兵间隔 t.polTime 轮询, 根据 freeWorkerQueue 是否有空闲的 worker 进行唤醒
@@ -338,7 +336,7 @@ func (t *TaskPool) cleanUp(isSafeClose bool) {
 	running := t.Running()
 	blocking := t.Blocking()
 	// 避免池子没有任务也打印日志
-	if !isSafeClose && (l > 0 || running > 0 || blocking > 0) && t.printLog {
+	if !isSafeClose && (l > 0 || running > 0 || blocking > 0) {
 		t.printf(levelInfo, "sentinel clean up [running: %d, blocking: %d, freeWorkerLen: %d]", running, blocking, l)
 	}
 	if blocking > 0 {
@@ -391,6 +389,10 @@ func (t *TaskPool) printStackInfo(funcName string, shortErr interface{}) {
 
 // print
 func (t *TaskPool) print(level logLevel, v string) {
+	if !t.printLog {
+		return
+	}
+	
 	if level == levelError {
 		t.log.Error(t.poolName, v)
 		return
@@ -400,6 +402,10 @@ func (t *TaskPool) print(level logLevel, v string) {
 
 // printf
 func (t *TaskPool) printf(level logLevel, format string, v ...interface{}) {
+	if !t.printLog {
+		return
+	}
+
 	argsLen := len(v) + 1
 	args := make([]interface{}, argsLen)
 
