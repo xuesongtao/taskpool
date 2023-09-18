@@ -16,7 +16,7 @@ type defaultLogger struct {
 	log *log.Logger
 }
 
-func newCjLogger() *defaultLogger {
+func newLogger() *defaultLogger {
 	return &defaultLogger{
 		log: log.New(os.Stderr, "", log.LstdFlags),
 	}
