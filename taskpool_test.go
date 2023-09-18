@@ -19,15 +19,19 @@ func init() {
 }
 
 func TestTmp(t *testing.T) {
-	a := []int{1}
-	t.Log(a, len(a), cap(a))
-	ptr := fmt.Sprintf("%p", a)
-	a = append(a[:0], a[1:]...)
-	ptr1 := fmt.Sprintf("%p", a)
-	if ptr1 != ptr {
-		t.Error("failed")
+	total := int32(0)
+	size := int32(30)
+	tp := NewTaskPool("tmp", 5, WithWorkerMaxLifeCycle(1))
+	for i := 0; i < int(size); i++ {
+		tp.Submit(func() {
+			atomic.AddInt32(&total, 1)
+			time.Sleep(3 * time.Second)
+		})
 	}
-	t.Log(a)
+	tp.SafeClose()
+	if total != size {
+		t.Log("it no ok", total, size)
+	}
 }
 
 func TestGetGoId(t *testing.T) {
