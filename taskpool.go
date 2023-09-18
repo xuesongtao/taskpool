@@ -13,8 +13,8 @@ import (
 
 const (
 	// 默认
-	defaultPolDuration        time.Duration = 5 * time.Minute // 哨兵默认轮询时间
-	defaultWorkerMaxLifeCycle sec           = 10 * sec(60)    // worker 最大存活期(单位: 秒)
+	defaultPolDuration        time.Duration = time.Minute // 哨兵默认轮询时间
+	defaultWorkerMaxLifeCycle sec           = 5 * sec(60) // worker 最大存活期(单位: 秒)
 
 	// 状态
 	closed int32 = 1 // 任务池是否关闭
@@ -160,7 +160,7 @@ func NewTaskPool(poolName string, capacity int, opts ...TaskPoolOption) *TaskPoo
 		capacity:           capacity,
 		poolName:           "(" + poolName + ")",
 		freeWorkerQueue:    make([]*worker, 0, capacity),
-		log:                newCjLogger(),
+		log:                newLogger(),
 		polTime:            defaultPolDuration,
 		workerMaxLifeCycle: defaultWorkerMaxLifeCycle,
 		// cancel:             cancel,
@@ -392,7 +392,7 @@ func (t *TaskPool) print(level logLevel, v string) {
 	if !t.printLog {
 		return
 	}
-	
+
 	if level == levelError {
 		t.log.Error(t.poolName, v)
 		return
