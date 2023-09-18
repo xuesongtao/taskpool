@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"gitee.com/xuesongtao/taskpool"
-	// "gitlab.cd.anpro/taskpool"
+	// "gitlab.cd.anpro/go/common/taskpool"
 )
 
 // ErrPageDemo 分页调用错误示例
