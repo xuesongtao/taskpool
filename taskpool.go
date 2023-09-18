@@ -13,8 +13,8 @@ import (
 
 const (
 	// 默认
-	defaultPolDuration        time.Duration = 5 * time.Minute // 哨兵默认轮询时间
-	defaultWorkerMaxLifeCycle sec           = 1 * sec(60)     // worker 最大存活期(单位: 秒)
+	defaultPolDuration        time.Duration = time.Minute // 哨兵默认轮询时间
+	defaultWorkerMaxLifeCycle sec           = 5 * sec(60) // worker 最大存活期(单位: 秒)
 
 	// 状态
 	closed int32 = 1 // 任务池是否关闭
