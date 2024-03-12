@@ -93,10 +93,10 @@ func newWorker(ctx context.Context) *worker {
 func (w *worker) goWorker(pool *TaskPool) {
 	go func() {
 		defer func() {
+			pool.deCrRunning()
 			if err := recover(); err != nil {
 				pool.printStackInfo(fmt.Sprintf("worker [%s]", w.workNo), err)
 			}
-			pool.deCrRunning()
 			pool.workerCache.Put(w)
 			// fmt.Printf("run: %d, block: %d", pool.Running(), pool.Blocking())
 			// 防止 running-1 发生在 getFreeWorker 之后, 就会出现一个协程一直阻塞, 需要再释放下
@@ -443,6 +443,9 @@ func (t *TaskPool) Close() {
 	}
 	// t.cond.Broadcast()
 	t.rwMu.Lock()
+	for _, v := range t.freeWorkerQueue {
+		close(v.taskCh)
+	}
 	t.freeWorkerQueue = nil
 	t.rwMu.Unlock()
 }
