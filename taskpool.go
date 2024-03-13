@@ -89,6 +89,10 @@ func newWorker(ctx context.Context) *worker {
 	}
 }
 
+func (w *worker) free() {
+	close(w.taskCh)
+}
+
 // goWorker 起一个工作协程
 func (w *worker) goWorker(pool *TaskPool) {
 	go func() {
@@ -101,6 +105,7 @@ func (w *worker) goWorker(pool *TaskPool) {
 			// fmt.Printf("run: %d, block: %d", pool.Running(), pool.Blocking())
 			// 防止 running-1 发生在 getFreeWorker 之后, 就会出现一个协程一直阻塞, 需要再释放下
 			pool.cond.Signal()
+			w.free()
 		}()
 
 		w.workNo = getGoId()
@@ -444,7 +449,7 @@ func (t *TaskPool) Close() {
 	// t.cond.Broadcast()
 	t.rwMu.Lock()
 	for _, v := range t.freeWorkerQueue {
-		close(v.taskCh)
+		v.free()
 	}
 	t.freeWorkerQueue = nil
 	t.rwMu.Unlock()
