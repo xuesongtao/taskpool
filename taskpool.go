@@ -19,6 +19,8 @@ const (
 	// 状态
 	closed int32 = 1 // 任务池是否关闭
 
+	getWorkerRetryMaxCount = 100
+
 	// 日志
 	levelInfo logLevel = iota
 	levelError
@@ -78,6 +80,7 @@ type worker struct {
 	ctx       context.Context // 用于传递关闭信号
 	startTime int64           // 记录开始的时间
 	workNo    string          // work 编号
+	stopped   bool            // 是否已停止
 	taskCh    chan taskFunc
 }
 
@@ -90,6 +93,7 @@ func newWorker(ctx context.Context) *worker {
 }
 
 func (w *worker) free() {
+	w.stopped = true
 	close(w.taskCh)
 }
 
@@ -223,20 +227,35 @@ func (t *TaskPool) Submit(task taskFunc, async ...bool) {
 	}
 
 	if len(async) > 0 && async[0] {
-		go func() {
-			w := t.getFreeWorker()
-			if t.closed() {
-				return
-			}
-			w.taskCh <- task
-		}()
-	} else {
-		w := t.getFreeWorker()
+		// 注: 避免任务处理阻塞导致 goroutine 泄露, 此暂停此功能
+		// go func() {
+		// 	w := t.getFreeWorker()
+		// 	if t.closed() {
+		// 		return
+		// 	}
+		// 	w.taskCh <- task
+		// }()
+		return
+	}
+
+	var w *worker
+	for i := 0; i < getWorkerRetryMaxCount; i++ {
+		w = t.getFreeWorker()
 		if t.closed() { // 防止已经获取到 w, 但 pool 已经关了, 这里再验证下
+			t.print(levelError, "task pool is closed")
 			return
 		}
-		w.taskCh <- task
+
+		if w.stopped {
+			continue
+		}
 	}
+
+	if w == nil {
+		t.printf(levelError, "get worker total %d, it is still fail, it will skip", getWorkerRetryMaxCount)
+		return
+	}
+	w.taskCh <- task
 }
 
 // getFreeWorker 获取 goroutine, 如果运行的数量大于等于最大数目的时候进行阻塞
