@@ -19,7 +19,7 @@ const (
 	// 状态
 	closed int32 = 1 // 任务池是否关闭
 
-	getWorkerRetryMaxCount = 100
+	getWorkerRetryMaxCount = 3
 
 	// 日志
 	levelInfo logLevel = iota
@@ -87,12 +87,18 @@ type worker struct {
 // newWorker
 func newWorker(ctx context.Context) *worker {
 	return &worker{
-		ctx:    ctx,
-		taskCh: make(chan taskFunc),
+		ctx:       ctx,
+		startTime: time.Now().Unix(),
+		workNo:    "",
+		stopped:   false,
+		taskCh:    make(chan taskFunc),
 	}
 }
 
 func (w *worker) free() {
+	if w.stopped {
+		return
+	}
 	w.stopped = true
 	close(w.taskCh)
 }
@@ -105,7 +111,6 @@ func (w *worker) goWorker(pool *TaskPool) {
 			if err := recover(); err != nil {
 				pool.printStackInfo(fmt.Sprintf("worker [%s]", w.workNo), err)
 			}
-			pool.workerCache.Put(w)
 			// fmt.Printf("run: %d, block: %d", pool.Running(), pool.Blocking())
 			// 防止 running-1 发生在 getFreeWorker 之后, 就会出现一个协程一直阻塞, 需要再释放下
 			pool.cond.Signal()
@@ -153,7 +158,6 @@ type TaskPool struct {
 	lastCleanUpTime    int64              // 上一次哨兵清理 worker 的时间
 	workerMaxLifeCycle sec                // worker 最大存活周期(单位: 秒)
 	freeWorkerQueue    []*worker          // 存放 worker, 保证能复用
-	workerCache        sync.Pool
 	rwMu               sync.RWMutex
 	cond               *sync.Cond
 }
@@ -182,9 +186,7 @@ func NewTaskPool(poolName string, capacity int, opts ...TaskPoolOption) *TaskPoo
 	if t.ctx == nil {
 		t.ctx, t.cancel = context.WithCancel(context.Background())
 	}
-	t.workerCache.New = func() interface{} {
-		return newWorker(t.ctx)
-	}
+
 	if t.isPre {
 		t.preGoWorker()
 	}
@@ -208,8 +210,7 @@ func (t *TaskPool) preGoWorker() {
 
 // genGo 生成 goroutine
 func (t *TaskPool) genGo() *worker {
-	w := t.workerCache.Get().(*worker)
-	w.startTime = time.Now().Unix()
+	w := newWorker(t.ctx)
 	w.goWorker(t)
 	return w
 }
@@ -226,6 +227,11 @@ func (t *TaskPool) Submit(task taskFunc, async ...bool) {
 		return
 	}
 
+	if task == nil {
+		t.print(levelError, "task is nil")
+		return
+	}
+
 	if len(async) > 0 && async[0] {
 		// 注: 避免任务处理阻塞导致 goroutine 泄露, 此暂停此功能
 		// go func() {
@@ -235,25 +241,12 @@ func (t *TaskPool) Submit(task taskFunc, async ...bool) {
 		// 	}
 		// 	w.taskCh <- task
 		// }()
-		return
+		// return
 	}
 
-	var w *worker
-	for i := 0; i < getWorkerRetryMaxCount; i++ {
-		w = t.getFreeWorker()
-		if t.closed() { // 防止已经获取到 w, 但 pool 已经关了, 这里再验证下
-			t.print(levelError, "task pool is closed")
-			return
-		}
-
-		if w.stopped {
-			continue
-		}
-		break
-	}
-
-	if w == nil {
-		t.printf(levelError, "get worker total %d, it is still fail, it will skip", getWorkerRetryMaxCount)
+	w := t.getFreeWorker()
+	if w == nil || w.stopped {
+		t.printf(levelError, "get worker is stopped, it will skip", getWorkerRetryMaxCount)
 		return
 	}
 	w.taskCh <- task
