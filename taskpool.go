@@ -249,6 +249,7 @@ func (t *TaskPool) Submit(task taskFunc, async ...bool) {
 		if w.stopped {
 			continue
 		}
+		break
 	}
 
 	if w == nil {
