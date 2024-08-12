@@ -245,6 +245,10 @@ func (t *TaskPool) Submit(task taskFunc, async ...bool) {
 	}
 
 	w := t.getFreeWorker()
+	if t.closed() {
+		t.print(levelError, "task pool is closed")
+		return
+	}
 	if w == nil || w.stopped {
 		t.printf(levelError, "get worker is stopped, it will skip", getWorkerRetryMaxCount)
 		return
