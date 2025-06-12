@@ -492,6 +492,11 @@ func (t *TaskPool) SafeClose(timeout ...time.Duration) {
 	t.workerMaxLifeCycle = sec(1)
 	t.rwMu.Unlock()
 	defer t.Close()
+	t.WaitRunning(ctx)
+}
+
+// WaitRunning 等待加入的任务执行完
+func (t *TaskPool) WaitRunning(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
