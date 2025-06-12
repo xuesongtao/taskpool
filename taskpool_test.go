@@ -1,6 +1,7 @@
 package taskpool
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math/rand"
@@ -114,6 +115,35 @@ func TestNewTaskPool_SafeClose(t *testing.T) {
 		})
 	}
 	p.SafeClose()
+
+	// 验证
+	for i := 0; i < size; i++ {
+		if _, ok := a[i]; !ok {
+			t.Fatal("handle is failed")
+		}
+	}
+}
+
+func TestWaitRunning(t *testing.T) {
+	t.Log("TestNewTaskPool_SafeClose start")
+	size := 3
+	p := NewTaskPool("test", size)
+
+	a := make(map[int]struct{}, size)
+	for i := 0; i < 10; i++ {
+		tmp := i
+		p.Submit(func() {
+			a[tmp] = struct{}{}
+		})
+	}
+	p.WaitRunning(context.TODO())
+	t.Log("执行完了")
+
+	p.Submit(func() {
+		print("执行...")
+	})
+	p.WaitRunning(context.TODO())
+	t.Log("执行完了")
 
 	// 验证
 	for i := 0; i < size; i++ {
